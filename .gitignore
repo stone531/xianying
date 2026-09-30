@@ -1,0 +1,14 @@
+# Android 构建产物与本地配置
+xianying/.gradle/
+xianying/build/
+xianying/app/build/
+xianying/local.properties
+xianying/.idea/
+xianying/.kotlin/
+*.apk
+*.jks
+*.keystore
+
+# 垃圾文件
+bash.exe.stackdump
+Thumbs.db
