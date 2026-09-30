@@ -1,6 +1,9 @@
 package com.xianying.app.runtime
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.xianying.app.model.ControlMode
 import com.xianying.app.model.TargetApp
 import com.xianying.app.service.MonitorAccessibilityService
@@ -24,8 +27,12 @@ object Runtime {
     /** App 全局 Context；MainActivity 创建时置入。 */
     @Volatile var appContext: Context? = null
 
-    /** 已启用的监控目标集合（主界面开关控制，持久化在 SharedPreferences）。 */
-    @Volatile var enabledTargets: Set<TargetApp> = setOf(TargetApp.DOUYIN)
+    /**
+     * 已启用的监控目标集合（主界面开关控制，持久化在 SharedPreferences）。
+     * 用 Compose 状态持有：主界面开关一点，读它的 UI 立即重绘（曾因普通变量
+     * 不触发重组，出现"点了开关界面不变"——实际已生效，纯显示问题）。
+     */
+    var enabledTargets: Set<TargetApp> by mutableStateOf(setOf(TargetApp.DOUYIN))
 
     /** 前台包名 ∈ 启用目标 → 是监控对象。 */
     fun isTarget(pkg: String?): Boolean {

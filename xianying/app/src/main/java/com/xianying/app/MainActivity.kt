@@ -290,7 +290,7 @@ fun MainScreen() {
                     enabled = !master,
                     label = { Text("条数") },
                     suffix = { Text("条") },
-                    supportingText = { Text("自由输入；单条看满 5 秒才计数，达标自动退出") },
+                    supportingText = { Text("单条看满 5 秒计 1 条。已知限制：抖音信息流暂识别不到切换（快手/B站待真机验证）") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,

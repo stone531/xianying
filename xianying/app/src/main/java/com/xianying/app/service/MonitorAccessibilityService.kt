@@ -54,8 +54,10 @@ class MonitorAccessibilityService : AccessibilityService() {
     /**
      * 滚动事件 = 用户在目标 App 里上下滑（短视频翻页）。
      * 一次物理滑动会产生一连串 SCROLL 事件，去抖 600ms 只当一次"切换视频"。
-     * 已知局限（记录为系统/识别限制）：评论区、个人页等横向/局部滚动也会触发，
-     * 可能多计条数；仅影响"仅条数"模式计数精度，不影响时长模式。
+     *
+     * 已知限制（2026-09-30 模拟器全事件侦察实测）：抖音信息流不发 TYPE_VIEW_SCROLLED，
+     * 只发持续的 TYPE_WINDOW_CONTENT_CHANGED 火龙（播放动画每 100ms 一条），与滑动
+     * 无法确定性区分——因此仅条数模式在抖音上不生效（UI 已如实标注），快手/B站待真机验证。
      */
     private fun onScroll(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
