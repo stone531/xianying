@@ -14,6 +14,9 @@ class ModelsTest {
         assertEquals(TargetApp.DOUYIN, TargetApp.fromPackage("com.ss.android.ugc.aweme.lite"))
         // 火山版
         assertEquals(TargetApp.DOUYIN, TargetApp.fromPackage("com.ss.android.ugc.live"))
+        // 精选（前身青桃，中长视频）与商城（原商城版，购物）——包名经应用宝/小米商店核实
+        assertEquals(TargetApp.DOUYIN, TargetApp.fromPackage("com.ss.android.yumme.video"))
+        assertEquals(TargetApp.DOUYIN, TargetApp.fromPackage("com.ss.android.ugc.livelite"))
     }
 
     @Test

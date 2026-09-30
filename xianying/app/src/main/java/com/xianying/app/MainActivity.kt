@@ -244,7 +244,7 @@ fun MainScreen() {
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 when (app) {
-                                    TargetApp.DOUYIN -> "含极速/火山版（待验证）"
+                                    TargetApp.DOUYIN -> "含极速/火山/精选/商城版（待验证）"
                                     TargetApp.BILIBILI -> "正式版已实测✓国际版待验证"
                                     TargetApp.KUAISHOU -> "全版本（待真机验证）"
                                 },

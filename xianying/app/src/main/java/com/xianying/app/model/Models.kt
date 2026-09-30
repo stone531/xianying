@@ -14,6 +14,11 @@ enum class TargetApp(val packages: Set<String>, val label: String, val emoji: St
             "com.ss.android.ugc.aweme",       // 抖音正式版（已验证）
             "com.ss.android.ugc.aweme.lite",  // 抖音极速版
             "com.ss.android.ugc.live",        // 抖音火山版
+            // 以下两个经官方应用商店核实（应用宝/小米商店详情页），真机验证前不算已实现。
+            // 内容形态非竖屏短视频流：精选=中长视频（前身青桃）、商城=纯购物（原"商城版"），
+            // 推荐用户对这两个 App 只用"仅时长"模式——仅条数的帧差会把页面切换误计成换视频。
+            "com.ss.android.yumme.video",     // 抖音精选
+            "com.ss.android.ugc.livelite",    // 抖音商城
         ),
         "抖音", "🎵",
     ),
