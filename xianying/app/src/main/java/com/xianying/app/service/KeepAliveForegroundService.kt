@@ -116,6 +116,10 @@ class KeepAliveForegroundService : Service() {
         Runtime.sessionManager.warningListener = { showWarningBlast() }
         // 缓冲结束 → 返回桌面；失败（无障碍掉线）→ 修复提醒通知，不能静默失效
         Runtime.sessionManager.exitListener = {
+            // 会话结束即停录屏：戒断回桌面后不再采样，状态栏录屏图标随之消失。
+            // 注意安卓 14+ 录屏授权一次性，停了下次仅条数会话要在主界面重新点④。
+            // 不做"空闲就停"：授权后（还没进抖音）也是空闲态，会被误杀。
+            try { MediaProjectionService.stop(this) } catch (_: Exception) { /* fail-open */ }
             if (!ExitExecutor.exitToHome()) showRepairNotification()
         }
 

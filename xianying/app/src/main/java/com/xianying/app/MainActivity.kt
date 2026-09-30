@@ -243,7 +243,11 @@ fun MainScreen() {
                             Text(app.label, style = MaterialTheme.typography.titleMedium)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (app == TargetApp.DOUYIN) "含极速/火山版（待验证）" else "全版本（待真机验证）",
+                                when (app) {
+                                    TargetApp.DOUYIN -> "含极速/火山版（待验证）"
+                                    TargetApp.BILIBILI -> "正式版已实测✓国际版待验证"
+                                    TargetApp.KUAISHOU -> "全版本（待真机验证）"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.tertiary
                             )
@@ -308,7 +312,7 @@ fun MainScreen() {
                     enabled = !master,
                     label = { Text("条数") },
                     suffix = { Text("条") },
-                    supportingText = { Text("单条看满 5 秒计 1 条。抖音需在下方权限区开启「④ 画面识别」才能数条数（低清采样，不保存画面）") },
+                    supportingText = { Text("单条看满 5 秒计 1 条。抖音需开启「④ 画面识别」（戒断后自动停止，重开需再授权）；B站已实测直接支持（无需④）；快手待真机验证") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -376,7 +380,8 @@ fun MainScreen() {
             }
             // ④ 仅条数模式需要：抖音不发滚动事件，只能靠画面变化识别切换。
             // 授权后状态栏会常驻系统录屏图标（系统规定），低清采样不保存画面。
-            PermissionRow("④ 画面识别（仅条数模式用）", projRunning) {
+            // 戒断退出时自动停止（图标消失）；安卓14+授权一次性，下次会话需重新点开。
+            PermissionRow("④ 画面识别（仅条数用·戒断后自动停止）", projRunning) {
                 projectionLauncher.launch(
                     ctx.getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent()
                 )

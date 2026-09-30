@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import com.xianying.app.detector.FrameDiffDetector
+import com.xianying.app.model.TargetApp
 import com.xianying.app.runtime.Runtime
 import com.xianying.app.session.Status
 
@@ -107,7 +108,11 @@ class MediaProjectionService : Service() {
         val image = reader.acquireLatestImage() ?: return
         try {
             val snap = Runtime.sessionManager.snapshot()
-            val gated = snap.status == Status.TIMING && (snap.config?.maxVideos ?: 0) > 0
+            // 帧差只服务抖音（它不发滚动事件）；快手/B站走无障碍滚动事件直连。
+            // 若不加此门：④开着刷B站会帧差+滚动双通道重复计数（2026-09-30 实测发现）。
+            val inDouyin = TargetApp.fromPackage(Runtime.lastTargetPkg) == TargetApp.DOUYIN
+            val gated = snap.status == Status.TIMING &&
+                (snap.config?.maxVideos ?: 0) > 0 && inDouyin
             if (!gated) {
                 detector.reset()      // 离开目标/非条数模式：清基线，防回来误报
                 return
