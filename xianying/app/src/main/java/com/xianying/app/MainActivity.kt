@@ -197,13 +197,13 @@ fun MainScreen() {
                             Text(app.label, style = MaterialTheme.typography.titleMedium)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (app == TargetApp.DOUYIN) "极速/火山包号待验证" else "包号待真机验证",
+                                if (app == TargetApp.DOUYIN) "含极速/火山版（待验证）" else "全版本（待真机验证）",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.tertiary
                             )
                         }
                         Text(
-                            app.packages.joinToString("\n"),
+                            "开 = 监控该平台全部已发行版本",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
