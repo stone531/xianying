@@ -43,7 +43,7 @@ class MediaProjectionService : Service() {
     private var display: VirtualDisplay? = null
     private var reader: ImageReader? = null
     private var sampleThread: HandlerThread? = null
-    private val detector = FrameDiffDetector(GRID_W, GRID_H).apply {
+    private val detector = FrameDiffDetector(GRID_W, GRID_H, changedRatioThreshold = RATIO_THRESHOLD).apply {
         sampleIntervalMs = SAMPLE_INTERVAL_MS
     }
     private var lastSampleAt = 0L
@@ -116,7 +116,10 @@ class MediaProjectionService : Service() {
             if (now - lastSampleAt < SAMPLE_INTERVAL_MS) return
             lastSampleAt = now
             val luma = downsample(image) ?: return
-            if (detector.feed(luma)) {
+            val isSwitch = detector.feed(luma)
+            // 调参期诊断：真实画面下"播放中/切换"各自的 ratio 分布
+            Log.d(TAG, "ratio=%.3f switch=%b".format(detector.lastChangedRatio, isSwitch))
+            if (isSwitch) {
                 Log.d(TAG, "video switch detected -> onVideoChanged")
                 Runtime.sessionManager.onVideoChanged()
             }
@@ -220,6 +223,13 @@ class MediaProjectionService : Service() {
 
         /** 采样间隔：约 2.5 帧/秒。 */
         private const val SAMPLE_INTERVAL_MS = 400L
+
+        /**
+         * 整屏切换判定阈值。模拟器实测（2026-09-30，抖音视频解码为绿屏、仅文字区变化）：
+         * 播放噪音 ratio ≤ 0.27，滑动切换峰值 0.35~0.77 → 取 0.35。
+         * 真机视频内容整屏替换，信号应更强，阈值需真机重校（TESTING.md 必测项）。
+         */
+        private const val RATIO_THRESHOLD = 0.35
 
         private const val CHANNEL_ID = "xianying_frame"
         private const val NOTI_ID = 3

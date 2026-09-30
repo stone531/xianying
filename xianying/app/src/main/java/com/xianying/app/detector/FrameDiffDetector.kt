@@ -34,6 +34,10 @@ class FrameDiffDetector(
     /** 采样间隔（毫秒），构造后由采样端设置，用于间隔计时。 */
     var sampleIntervalMs: Long = 400
 
+    /** 最近一帧的"变化格子占比"（0.0~1.0），调参期诊断用。 */
+    var lastChangedRatio: Double = 0.0
+        private set
+
     /**
      * 清空基线。采样端在"不该计数的场景"（不在目标 App / 非计时中 / 非条数模式）
      * 调用：否则离开抖音逛别的再回来，首帧与旧基线整屏不同 → 误报一次切换。
@@ -59,7 +63,9 @@ class FrameDiffDetector(
         for (i in luma.indices) {
             if (kotlin.math.abs(luma[i] - p[i]) > cellThreshold) changed++
         }
-        val big = changed.toDouble() / luma.size >= changedRatioThreshold
+        val ratio = changed.toDouble() / luma.size
+        lastChangedRatio = ratio
+        val big = ratio >= changedRatioThreshold
         val isSwitch = big && !prevWasBig && (nowMs - lastSwitchAt >= minGapMs)
         if (isSwitch) lastSwitchAt = nowMs
         prevWasBig = big
