@@ -83,6 +83,10 @@ class SessionManager(
         val isTarget = isTargetPackage(pkg)
         println("XianyingSM: onForegroundChanged pkg=$pkg isTarget=$isTarget inTarget=$inTarget status=$status quota=$quotaMs")
         if (isTarget == inTarget) return                     // 幂等：状态没变就不动
+        // 警告期（10 秒缓冲）任何"离开"事件都忽略：全屏警告通知自身的 systemui 横幅、
+        // 系统对话框都会产生窗口事件，若当作离开会把 WARNING 打断成 IDLE，退出动作永远不执行
+        //（真机踩坑 2026-09-30）。缓冲期必须雷打不动走完并执行返回桌面。
+        if (status == Status.WARNING && !isTarget) return
         inTarget = isTarget
         when {
             isTarget -> onEnterTarget()
@@ -172,12 +176,8 @@ class SessionManager(
                 status = Status.PAUSED                       // 额度冻结
                 emit()
             }
-            Status.WARNING -> {                              // 警告期内用户自己走了：
-                status = Status.IDLE                         // 额度已用完，会话就地结束，
-                warningRemainingMs = 0                       // 不再触发返回桌面（人已离开）
-                emit()
-            }
-            Status.IDLE, Status.PAUSED -> Unit               // 离开目标无需处理
+            // WARNING 不会到达这里（onForegroundChanged 已在警告期拦截离开事件）
+            Status.IDLE, Status.PAUSED, Status.WARNING -> Unit
         }
     }
 

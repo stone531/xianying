@@ -14,20 +14,6 @@ import java.util.Locale
  */
 class MonitorAccessibilityService : AccessibilityService() {
 
-    companion object {
-        /**
-         * 最近 200 条事件环形日志。
-         * 真机不便连线看不了 logcat，靠它在主界面排查"为什么没识别到"。
-         */
-        val recentEvents = ArrayDeque<String>()
-
-        private fun log(pkg: String?) {
-            val ts = SimpleDateFormat("HH:mm:ss", Locale.CHINA).format(Date())
-            recentEvents.addLast("$ts  ${pkg ?: "(null)"}")
-            while (recentEvents.size > 200) recentEvents.removeFirst()
-        }
-    }
-
     override fun onServiceConnected() {
         super.onServiceConnected()
         Runtime.monitorService = this
@@ -48,13 +34,44 @@ class MonitorAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName) return          // 忽略自己界面的窗口事件
+        if (isOverlay(pkg)) return               // 非真前台的系统窗口，直接忽略
         log(pkg)
         android.util.Log.d("XianyingEye",
             "event pkg=$pkg isTarget=${Runtime.isTarget(pkg)} status=${Runtime.sessionManager.snapshot().status}")
         Runtime.sessionManager.onForegroundChanged(pkg)
         android.util.Log.d("XianyingEye",
             "after status=${Runtime.sessionManager.snapshot().status}")
+    }
+
+    companion object {
+        /**
+         * 最近 200 条事件环形日志。
+         * 真机不便连线看不了 logcat，靠它在主界面排查"为什么没识别到"。
+         */
+        val recentEvents = ArrayDeque<String>()
+
+        /**
+         * "非真前台"的系统窗口名单——这些窗口出现不代表用户切换了 App：
+         *  - 自己的包（含全屏警告页）
+         *  - com.android.systemui：通知横幅、通知栏、快捷设置（额度预警横幅就是它！）
+         *  - android：系统对话框（崩溃/ANR 弹窗）
+         *  - 输入法（抖音评论打字时键盘弹出，人还在抖音）
+         * 曾尝试用 getLaunchIntentForPackage==null 判断，但 Android 11+ 包可见性限制导致
+         * 查任何第三方 App 都返回 null（连抖音都被误杀），且桌面本身也没有桌面图标，故弃用。
+         */
+        private val OVERLAY_PACKAGES = setOf("com.android.systemui", "android")
+
+        private fun isOverlay(pkg: String): Boolean =
+            pkg == "com.xianying.app" ||
+                pkg in OVERLAY_PACKAGES ||
+                pkg.contains("inputmethod") ||
+                pkg.endsWith(".ime")
+
+        private fun log(pkg: String?) {
+            val ts = SimpleDateFormat("HH:mm:ss", Locale.CHINA).format(Date())
+            recentEvents.addLast("$ts  ${pkg ?: "(null)"}")
+            while (recentEvents.size > 200) recentEvents.removeFirst()
+        }
     }
 
     override fun onInterrupt() { /* 系统中断无障碍服务时回调，无需处理 */ }

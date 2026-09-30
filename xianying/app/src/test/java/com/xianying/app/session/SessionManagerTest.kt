@@ -182,18 +182,21 @@ class SessionManagerTest {
         assertEquals(0L, m.snapshot().remainingMs)
     }
 
-    @Test fun leaveDuringWarning_endsSession_withoutExit() {
-        var exited = false
+    @Test fun leaveDuringWarning_countdownContinues_exitStillFires() {
+        // 真机踩坑：全屏警告通知的 systemui 横幅会产生"离开目标"窗口事件，
+        // 曾把 WARNING 打断成 IDLE 导致永不返回桌面。现规定：警告期任何离开事件都忽略。
+        var exited = 0
         val m = graded()
-        m.exitListener = { exited = true }
+        m.exitListener = { exited++ }
         m.configure(60_000L)
         m.onForegroundChanged("com.ss.android.ugc.aweme")
-        tick(m, 60_000)                                  // WARNING 中
-        m.onForegroundChanged("com.tencent.mm")          // 用户自己走了
-        assertEquals(Status.IDLE, m.snapshot().status)   // 会话结束
-        assertFalse(exited)                              // 不需要再轰回桌面
-        tick(m, 10_000)                                  // 不会再有任何动作
-        assertFalse(exited)
+        tick(m, 60_000)                                  // WARNING 中（5s 缓冲）
+        m.onForegroundChanged("com.android.systemui")    // 警告横幅/系统窗口：不算离开
+        m.onForegroundChanged("com.tencent.mm")          // 真切走也忽略：缓冲期必须走完
+        assertEquals(Status.WARNING, m.snapshot().status)
+        tick(m, 5_000)                                   // 缓冲走完
+        assertEquals(Status.IDLE, m.snapshot().status)
+        assertEquals(1, exited)                          // 退出照常执行
     }
 
     @Test fun warningFlagsReset_forNextSession() {
