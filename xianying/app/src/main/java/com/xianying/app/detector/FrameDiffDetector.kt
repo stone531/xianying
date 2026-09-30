@@ -35,6 +35,17 @@ class FrameDiffDetector(
     var sampleIntervalMs: Long = 400
 
     /**
+     * 清空基线。采样端在"不该计数的场景"（不在目标 App / 非计时中 / 非条数模式）
+     * 调用：否则离开抖音逛别的再回来，首帧与旧基线整屏不同 → 误报一次切换。
+     */
+    fun reset() {
+        prev = null
+        prevWasBig = false
+        lastSwitchAt = Long.MIN_VALUE / 2
+        nowMs = 0L
+    }
+
+    /**
      * 喂入一帧（长度必须 = w*h，每格为 0~255 亮度）。
      * 返回 true = 检测到一次"切换到新视频"。
      */

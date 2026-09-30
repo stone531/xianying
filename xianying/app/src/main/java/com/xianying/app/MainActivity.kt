@@ -1,10 +1,12 @@
 package com.xianying.app
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.Activity
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -59,6 +61,7 @@ import com.xianying.app.model.ControlMode
 import com.xianying.app.model.TargetApp
 import com.xianying.app.runtime.Runtime
 import com.xianying.app.service.KeepAliveForegroundService
+import com.xianying.app.service.MediaProjectionService
 import com.xianying.app.service.MonitorAccessibilityService
 import com.xianying.app.session.Status
 import com.xianying.app.ui.theme.限映Theme
@@ -130,6 +133,15 @@ fun MainScreen() {
     val notifPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
+
+    // ④ 画面识别授权：系统弹"开始录屏？"对话框，同意后启动低清采样服务
+    val projectionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK && res.data != null) {
+            MediaProjectionService.start(ctx, res.resultCode, res.data!!)
+        }
+    }
 
     // 每秒刷新会话状态 + 事件日志（仅本界面可见时刷新）
     LaunchedEffect(Unit) {
@@ -210,6 +222,7 @@ fun MainScreen() {
                         }
                     } else {
                         KeepAliveForegroundService.stop(ctx)
+                        MediaProjectionService.stop(ctx)   // 画面识别随总开关一并停
                         Runtime.sessionManager.reset()
                     }
                 })
@@ -290,7 +303,7 @@ fun MainScreen() {
                     enabled = !master,
                     label = { Text("条数") },
                     suffix = { Text("条") },
-                    supportingText = { Text("单条看满 5 秒计 1 条。已知限制：抖音信息流暂识别不到切换（快手/B站待真机验证）") },
+                    supportingText = { Text("单条看满 5 秒计 1 条。抖音需在下方权限区开启「④ 画面识别」才能数条数（低清采样，不保存画面）") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -354,6 +367,13 @@ fun MainScreen() {
                 ctx.startActivity(
                     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                         Uri.parse("package:${ctx.packageName}"))
+                )
+            }
+            // ④ 仅条数模式需要：抖音不发滚动事件，只能靠画面变化识别切换。
+            // 授权后状态栏会常驻系统录屏图标（系统规定），低清采样不保存画面。
+            PermissionRow("④ 画面识别（仅条数模式用）", MediaProjectionService.running) {
+                projectionLauncher.launch(
+                    ctx.getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent()
                 )
             }
         }

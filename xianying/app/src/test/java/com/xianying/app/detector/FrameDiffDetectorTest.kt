@@ -76,6 +76,18 @@ class FrameDiffDetectorTest {
         assertEquals(2, switches)
     }
 
+    @Test fun reset_clearsBaseline_noFalseSwitchOnReturn() {
+        // 在抖音看视频 → 切到微信（画面全变但 gating 拦住并 reset）→ 回抖音
+        // 回来的首帧只建基线，不得误报一次"切视频"
+        val d = FrameDiffDetector(w, h)
+        d.feed(frame(10))
+        d.feed(frame(20, mutateRatio = 0.25))          // 抖音播放中
+        d.reset()                                       // 离开目标场景
+        assertFalse(d.feed(frame(500)))                 // 回到抖音：首帧建基线
+        assertFalse(d.feed(frame(500, mutateRatio = 0.3)))  // 正常播放也不报
+        assertTrue(d.feed(frame(600)))                  // 真切下一条才报
+    }
+
     @Test fun threshold_ratios_tunable() {
         // 高阈值（95% 格子变化才算切）下 80% 变化不算；默认 70% 下算
         val strict = FrameDiffDetector(w, h, changedRatioThreshold = 0.95)
