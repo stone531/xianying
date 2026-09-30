@@ -75,11 +75,54 @@ class SessionManagerTest {
         m.onForegroundChanged("com.ss.android.ugc.aweme")
         tick(60_000)
         m.onForegroundChanged(null)                      // 回桌面
-        tick(29 * 60_000)                                // 离开任意久（MVP 不做 30 分钟解除）
+        tick(29 * 60_000)                                // 脱离 29 分钟（< 30 分钟，会话仍保留）
         m.onForegroundChanged("com.ss.android.ugc.aweme")
         val s = m.snapshot()
         assertEquals(Status.TIMING, s.status)
         assertEquals(4 * 60_000L, s.remainingMs)         // 剩余额度保留
+    }
+
+    // ---- 30 分钟脱离自动解除（规格：脱离满 30 分钟，本次会话管控自动失效） ----
+
+    @Test fun awayReaches30min_sessionReleased_nextEntryNewSession() {
+        m.configure(5 * 60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(60_000)                                     // 用掉 1 分钟，剩 4 分钟
+        m.onForegroundChanged("com.tencent.mm")          // 脱离开始
+        tick(29 * 60_000)
+        assertEquals(Status.PAUSED, m.snapshot().status) // 29 分钟：还在保留
+        tick(60_000)                                     // 脱离累计满 30 分钟
+        assertEquals(Status.IDLE, m.snapshot().status)   // 会话自动销毁
+        assertEquals(0L, m.snapshot().remainingMs)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")   // 再进入 = 全新会话
+        val s = m.snapshot()
+        assertEquals(Status.TIMING, s.status)
+        assertEquals(5 * 60_000L, s.remainingMs)         // 拿满额度，而非残留的 4 分钟
+    }
+
+    @Test fun awayTimer_resetsOnReentry_midwayReturnKeepsQuota() {
+        m.configure(5 * 60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(60_000)                                     // 剩 4 分钟
+        m.onForegroundChanged("com.tencent.mm")
+        tick(29 * 60_000)                                // 脱离 29 分钟
+        m.onForegroundChanged("com.ss.android.ugc.aweme")   // 中途切回：脱离计时清零
+        assertEquals(4 * 60_000L, m.snapshot().remainingMs)
+        m.onForegroundChanged("com.tencent.mm")          // 再次脱离
+        tick(29 * 60_000)                                // 又 29 分钟：不能解除（计时已清零重来）
+        assertEquals(Status.PAUSED, m.snapshot().status)
+        tick(60_000)                                     // 累计满 30 分钟才解除
+        assertEquals(Status.IDLE, m.snapshot().status)
+    }
+
+    @Test fun releasedByAway_noExitFired() {
+        var exited = false
+        m.exitListener = { exited = true }
+        m.configure(5 * 60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        m.onForegroundChanged("com.tencent.mm")
+        tick(30 * 60_000)                                // 脱离满 30 分钟触发解除
+        assertFalse(exited)                              // 人已不在抖音，不该执行"返回桌面"
     }
 
     // ---- 到点退出 ----
@@ -144,7 +187,7 @@ class SessionManagerTest {
     // ---- 测试替身包名 ----
 
     @Test fun overridePredicate_treatsSubstituteAsTarget() {
-        val m2 = SessionManager(clock) { it == "com.android.chrome" }
+        val m2 = SessionManager(clock, isTargetPackage = { it == "com.android.chrome" })
         m2.configure(60_000L)
         m2.onForegroundChanged("com.ss.android.ugc.aweme")  // 正式抖音包名不算
         assertEquals(Status.IDLE, m2.snapshot().status)

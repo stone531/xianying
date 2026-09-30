@@ -11,9 +11,11 @@ import com.xianying.app.model.TargetApp
  *  - tick()：前台服务每秒调用，推进时间
  *  - configure(quotaMs)：主界面设置本次额度（对下一次新会话生效）
  *
- * 核心规则（降级版 MVP）：
+ * 核心规则（降级版 MVP + 30 分钟脱离解除）：
  *  - 进抖音且已有额度 → 开始/恢复倒计时
- *  - 离开抖音 → 暂停，剩余额度保留
+ *  - 离开抖音 → 暂停，剩余额度保留，同时开始累计脱离时长
+ *  - 脱离中途切回抖音 → 脱离计时清零，沿用本次剩余额度
+ *  - 脱离累计满 30 分钟 → 会话自动销毁（下次进入 = 全新会话拿满额度；人不在目标 App，不触发退出动作）
  *  - 额度归零（必然发生在抖音前台期间）→ 触发 exitListener（执行返回桌面）→ 会话结束
  *  - 结束后无冷却：再进抖音按当前预设额度开新会话（产品红线：自主管控，不强制封锁）
  */
@@ -21,6 +23,8 @@ class SessionManager(
     private val clock: Clock,
     /** 目标判定函数，默认按 TargetApp 包名表；可注入替身包名用于模拟器测试。 */
     private val isTargetPackage: (String?) -> Boolean = { TargetApp.fromPackage(it) != null },
+    /** 脱离自动解除阈值（规格固定 30 分钟；构造参数化便于测试与后续调档）。 */
+    private val awayLimitMs: Long = 30 * 60_000L,
 ) {
 
     /** 每次状态/快照变化回调（含每秒 tick），供通知栏与主界面刷新。 */
@@ -33,6 +37,7 @@ class SessionManager(
     private var quotaMs = 0L                 // 预设额度（分钟换算成毫秒）
     private var remainingMs = 0L             // 本会话剩余额度
     private var inTarget = false             // 当前前台是否为目标 App
+    private var awayMs = 0L                  // 本次脱离已累计时长（切回目标即清零）
     private var lastTickMs = clock.now()
 
     fun snapshot() = SessionSnapshot(
@@ -53,6 +58,7 @@ class SessionManager(
         status = Status.IDLE
         remainingMs = 0
         inTarget = false
+        awayMs = 0
         emit()
     }
 
@@ -72,21 +78,35 @@ class SessionManager(
         val now = clock.now()
         val dt = now - lastTickMs
         lastTickMs = now
-        if (status == Status.TIMING) {
-            remainingMs -= dt
-            if (remainingMs <= 0) {
-                remainingMs = 0
-                status = Status.IDLE
-                inTarget = false    // 会话已终结；此后任何抖音事件都视为"新会话"（无冷却红线）
-                emit()
-                exitListener?.invoke()                       // 服务层此刻执行返回桌面
-                return
+        when (status) {
+            Status.TIMING -> {
+                remainingMs -= dt
+                if (remainingMs <= 0) {
+                    remainingMs = 0
+                    status = Status.IDLE
+                    inTarget = false    // 会话已终结；此后任何抖音事件都视为"新会话"（无冷却红线）
+                    awayMs = 0
+                    emit()
+                    exitListener?.invoke()                   // 服务层此刻执行返回桌面
+                    return
+                }
             }
+            Status.PAUSED -> {
+                awayMs += dt                                        // 脱离计时只在暂停期累计
+                if (awayMs >= awayLimitMs) {                        // 满 30 分钟：会话自动解除
+                    status = Status.IDLE
+                    remainingMs = 0
+                    awayMs = 0
+                    // 人已不在目标 App，无需执行返回桌面（不触发 exitListener）
+                }
+            }
+            Status.IDLE -> Unit
         }
         emit()
     }
 
     private fun onEnterTarget() {
+        awayMs = 0                                           // 切回目标：脱离计时清零（规格）
         when (status) {
             Status.IDLE ->
                 if (quotaMs > 0) {                           // 无额度（=未设限/关闭）则保持 IDLE
