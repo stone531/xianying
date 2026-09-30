@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -54,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xianying.app.model.ControlMode
 import com.xianying.app.model.TargetApp
 import com.xianying.app.runtime.Runtime
 import com.xianying.app.service.KeepAliveForegroundService
@@ -114,7 +116,14 @@ fun MainScreen() {
     val sp = ctx.getSharedPreferences("xianying", Context.MODE_PRIVATE)
 
     var master by remember { mutableStateOf(sp.getBoolean("master", false)) }
+    var mode by remember {
+        mutableStateOf(
+            try { ControlMode.valueOf(sp.getString("mode", ControlMode.DURATION.name)!!) }
+            catch (e: IllegalArgumentException) { ControlMode.DURATION }
+        )
+    }
     var minutes by remember { mutableStateOf(sp.getInt("minutes", 10).coerceAtLeast(0).toString()) }
+    var videos by remember { mutableStateOf(sp.getInt("videos", 10).coerceAtLeast(0).toString()) }
     var snap by remember { mutableStateOf(Runtime.sessionManager.snapshot()) }
     @Suppress("UNUSED_EXPRESSION") MainActivity.refreshTick.value   // 读取以触发重组刷新权限状态
 
@@ -130,13 +139,22 @@ fun MainScreen() {
         }
     }
 
-    /** 额度自由输入（规格：无预设选项）：仅数字，最多 3 位；空 = 不设限（无限次模式）。 */
-    fun applyQuota(input: String) {
-        val f = input.filter { it.isDigit() }.take(3)
-        minutes = f
-        val n = f.toIntOrNull() ?: 0
-        sp.edit().putInt("minutes", n).apply()
-        Runtime.sessionManager.configure(if (n > 0) n * 60_000L else 0L)
+    /** 模式与额度统一落盘并生效（额度自由输入：仅数字；空 = 该项不设限）。 */
+    fun applyConfig(newMode: ControlMode = mode, newMinutes: String = minutes, newVideos: String = videos) {
+        mode = newMode
+        minutes = newMinutes.filter { it.isDigit() }.take(3)
+        videos = newVideos.filter { it.isDigit() }.take(3)
+        val min = minutes.toIntOrNull() ?: 0
+        val cnt = videos.toIntOrNull() ?: 0
+        sp.edit()
+            .putString("mode", mode.name)
+            .putInt("minutes", min)
+            .putInt("videos", cnt)
+            .apply()
+        Runtime.sessionManager.configure(
+            if (mode == ControlMode.DURATION && min > 0) min * 60_000L else 0L,
+            if (mode == ControlMode.COUNT && cnt > 0) cnt else 0,
+        )
     }
 
     Column(
@@ -230,29 +248,73 @@ fun MainScreen() {
             }
         }
 
-        // ---- 每次额度（总开关开启时锁定；规格：自由输入，无预设选项）----
-        SectionCard("每次额度", if (master) "关闭总开关后可修改" else "对下一次进入目标 App 生效") {
-            OutlinedTextField(
-                value = minutes,
-                onValueChange = { applyQuota(it) },
-                enabled = !master,             // 总开关开启时锁定
-                label = { Text("分钟数") },
-                suffix = { Text("分钟") },
-                supportingText = { Text("1~999 自由输入；留空 = 不设限（无限次模式）") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
+        // ---- 管控模式与额度（总开关开启时锁定）----
+        SectionCard("管控模式与额度", if (master) "关闭总开关后可修改" else "对下一次进入目标 App 生效") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ControlMode.entries.forEach { md ->
+                    FilterChip(
+                        selected = mode == md,
+                        enabled = !master,      // 总开关开启时锁定
+                        onClick = { applyConfig(newMode = md) },
+                        label = {
+                            Text(
+                                when (md) {
+                                    ControlMode.DURATION -> "仅时长"
+                                    ControlMode.COUNT -> "仅条数"
+                                    ControlMode.UNLIMITED -> "无限次"
+                                }
+                            )
+                        }
+                    )
+                }
+            }
+            when (mode) {
+                ControlMode.DURATION -> OutlinedTextField(
+                    value = minutes,
+                    onValueChange = { applyConfig(newMinutes = it) },
+                    enabled = !master,
+                    label = { Text("分钟数") },
+                    suffix = { Text("分钟") },
+                    supportingText = { Text("自由输入 1~999；前台累计计时，切出自动暂停") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                ControlMode.COUNT -> OutlinedTextField(
+                    value = videos,
+                    onValueChange = { applyConfig(newVideos = it) },
+                    enabled = !master,
+                    label = { Text("条数") },
+                    suffix = { Text("条") },
+                    supportingText = { Text("自由输入；单条看满 5 秒才计数，达标自动退出") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                ControlMode.UNLIMITED -> Text(
+                    "本次会话不做管控，直接放行",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         // ---- 当前会话 ----
         SectionCard("当前会话", null) {
             val (dot, text) = when (snap.status) {
                 Status.IDLE -> Color(0xFF9E9E9E) to "空闲 · 未计时"
-                Status.TIMING -> Color(0xFF4CAF50) to
-                    "计时中 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
-                Status.PAUSED -> Color(0xFFFF9800) to
-                    "已暂停 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒（额度保留）"
+                Status.TIMING -> when {
+                    (snap.config?.maxVideos ?: 0) > 0 -> Color(0xFF4CAF50) to
+                        "计时中 · 已刷 ${snap.watchedVideos} / ${snap.config!!.maxVideos} 条"
+                    else -> Color(0xFF4CAF50) to
+                        "计时中 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
+                }
+                Status.PAUSED -> when {
+                    (snap.config?.maxVideos ?: 0) > 0 -> Color(0xFFFF9800) to
+                        "已暂停 · 已刷 ${snap.watchedVideos} / ${snap.config!!.maxVideos} 条（额度保留）"
+                    else -> Color(0xFFFF9800) to
+                        "已暂停 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒（额度保留）"
+                }
                 Status.WARNING -> Color(0xFFF44336) to
                     "额度已用完 · ${(snap.warningRemainingMs + 999) / 1000} 秒后返回桌面"
             }

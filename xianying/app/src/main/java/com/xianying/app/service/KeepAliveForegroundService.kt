@@ -96,8 +96,12 @@ class KeepAliveForegroundService : Service() {
 
     private fun notificationText(snap: SessionSnapshot): String = when (snap.status) {
         Status.IDLE -> "监控运行中"
-        Status.TIMING ->
-            "剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
+        Status.TIMING -> when {
+            (snap.config?.maxVideos ?: 0) > 0 ->
+                "已刷 ${snap.watchedVideos} / ${snap.config!!.maxVideos} 条"
+            else ->
+                "剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
+        }
         Status.PAUSED -> "已暂停（剩余额度保留）"
         Status.WARNING ->
             "额度已用完 · ${(snap.warningRemainingMs + 999) / 1000} 秒后返回桌面"

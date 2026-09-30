@@ -15,8 +15,10 @@ enum class Status { IDLE, TIMING, PAUSED, WARNING }
 data class SessionSnapshot(
     val status: Status,
     val config: SessionConfig? = null,
-    /** 剩余额度（毫秒）。非 TIMING/PAUSED 时为 0。 */
+    /** 剩余时长额度（毫秒）。非 TIMING/PAUSED 或不限时长时为 0。 */
     val remainingMs: Long = 0L,
     /** WARNING 警告期剩余毫秒；非 WARNING 时为 0。 */
     val warningRemainingMs: Long = 0L,
+    /** 本会话已计有效观看条数。IDLE 时为 0。 */
+    val watchedVideos: Int = 0,
 )

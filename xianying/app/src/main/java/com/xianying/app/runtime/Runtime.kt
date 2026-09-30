@@ -1,6 +1,7 @@
 package com.xianying.app.runtime
 
 import android.content.Context
+import com.xianying.app.model.ControlMode
 import com.xianying.app.model.TargetApp
 import com.xianying.app.service.MonitorAccessibilityService
 import com.xianying.app.session.SessionManager
@@ -43,7 +44,16 @@ object Runtime {
         enabledTargets = TargetApp.entries.filter {
             sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
         }.toSet()
-        sessionManager.configure(sp.getInt("minutes", 10) * 60_000L)
+        // 模式决定哪一种额度生效：仅时长=分钟数，仅条数=条数，无限次=都不限
+        val mode = try {
+            ControlMode.valueOf(sp.getString("mode", ControlMode.DURATION.name)!!)
+        } catch (e: IllegalArgumentException) {
+            ControlMode.DURATION                      // 旧版本存根兜底
+        }
+        sessionManager.configure(
+            if (mode == ControlMode.DURATION) sp.getInt("minutes", 10) * 60_000L else 0L,
+            if (mode == ControlMode.COUNT) sp.getInt("videos", 10) else 0,
+        )
         return sp.getBoolean("master", false)
     }
 }

@@ -217,6 +217,91 @@ class SessionManagerTest {
         assertEquals(2, warned)                          // 新会话预警正常再触发
     }
 
+    // ---- 仅条数模式：有效观看（≥5秒）计数，达条数触发戒断 ----
+
+    /** 条数模式状态机：不限时长，3 条触发。 */
+    private fun counter() = SessionManager(
+        clock,
+        isTargetPackage = { it == "com.ss.android.ugc.aweme" },
+        awayLimitMs = 30 * 60_000L,
+        warnAtMs = 0L,                    // 条数模式无时长预警线
+        warningMs = 5_000L,
+        validVideoMs = 5_000L,
+    )
+
+    private fun swipe(m: SessionManager) = m.onVideoChanged()
+
+    @Test fun countMode_under5s_notCounted() {
+        val m = counter()
+        m.configure(0L, 3)                                    // 仅条数：3 条
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 4_999)                                        // 看 4.999 秒就划走
+        swipe(m)
+        assertEquals(Status.TIMING, m.snapshot().status)      // 不计数、不戒断
+        assertEquals(0, m.snapshot().watchedVideos)
+    }
+
+    @Test fun countMode_5sOrMore_counted() {
+        val m = counter()
+        m.configure(0L, 3)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 5_000)                                        // 满 5 秒
+        swipe(m)
+        assertEquals(1, m.snapshot().watchedVideos)
+        assertEquals(Status.TIMING, m.snapshot().status)      // 未达 3 条继续
+    }
+
+    @Test fun countMode_reachMax_entersWarning_thenExits() {
+        var exited = 0
+        val m = counter()
+        m.exitListener = { exited++ }
+        m.configure(0L, 2)                                    // 2 条触发
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 6_000); swipe(m)                              // 第 1 条
+        tick(m, 6_000); swipe(m)                              // 第 2 条 → 立即进警告期
+        assertEquals(Status.WARNING, m.snapshot().status)
+        assertEquals(2, m.snapshot().watchedVideos)
+        assertFalse(exited > 0)
+        tick(m, 5_000)                                        // 警告期走完
+        assertEquals(Status.IDLE, m.snapshot().status)
+        assertEquals(1, exited)                               // 返回桌面
+    }
+
+    @Test fun countMode_videoTimer_pausesWhileAway() {
+        val m = counter()
+        m.configure(0L, 1)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 3_000)                                        // 本条看了 3 秒
+        m.onForegroundChanged("com.tencent.mm")               // 切走：本条视频计时也暂停
+        tick(m, 60_000)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")     // 切回：续看同一条
+        tick(m, 2_000)                                        // 补满 5 秒
+        swipe(m)
+        assertEquals(1, m.snapshot().watchedVideos)           // 3s+2s=5s 计 1 条
+    }
+
+    @Test fun countMode_newSession_countersReset() {
+        val m = counter()
+        m.configure(0L, 2)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 6_000); swipe(m)
+        tick(m, 6_000); swipe(m)                              // 2 条 → WARNING
+        tick(m, 5_000)                                        // 退出，IDLE
+        m.onForegroundChanged("com.ss.android.ugc.aweme")     // 新会话
+        assertEquals(Status.TIMING, m.snapshot().status)
+        assertEquals(0, m.snapshot().watchedVideos)           // 条数清零重拿 2 条额度
+    }
+
+    @Test fun countMode_swipeOutsideTarget_ignored() {
+        val m = counter()
+        m.configure(0L, 1)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 6_000)
+        m.onForegroundChanged("com.tencent.mm")               // 在微信里的滚动事件不算
+        swipe(m)
+        assertEquals(0, m.snapshot().watchedVideos)
+    }
+
     // ---- 到点退出 ----
 
     @Test fun quotaExhausted_invokesExit_thenIdle() {

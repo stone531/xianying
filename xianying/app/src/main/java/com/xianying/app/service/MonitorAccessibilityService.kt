@@ -32,7 +32,14 @@ class MonitorAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> onWindowState(event)
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> onScroll(event)
+        }
+    }
+
+    /** 窗口切换 = 前台 App 变化，报给状态机。 */
+    private fun onWindowState(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
         if (isOverlay(pkg)) return               // 非真前台的系统窗口，直接忽略
         log(pkg)
@@ -41,6 +48,22 @@ class MonitorAccessibilityService : AccessibilityService() {
         Runtime.sessionManager.onForegroundChanged(pkg)
         android.util.Log.d("XianyingEye",
             "after status=${Runtime.sessionManager.snapshot().status}")
+    }
+
+    /**
+     * 滚动事件 = 用户在目标 App 里上下滑（短视频翻页）。
+     * 一次物理滑动会产生一连串 SCROLL 事件，去抖 600ms 只当一次"切换视频"。
+     * 已知局限（记录为系统/识别限制）：评论区、个人页等横向/局部滚动也会触发，
+     * 可能多计条数；仅影响"仅条数"模式计数精度，不影响时长模式。
+     */
+    private fun onScroll(event: AccessibilityEvent) {
+        val pkg = event.packageName?.toString() ?: return
+        if (!Runtime.isTarget(pkg)) return       // 只关心目标 App 内的滑动
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastScrollMs < SCROLL_DEBOUNCE_MS) return
+        lastScrollMs = now
+        android.util.Log.d("XianyingEye", "scroll pkg=$pkg -> videoChanged")
+        Runtime.sessionManager.onVideoChanged()
     }
 
     companion object {
@@ -60,6 +83,10 @@ class MonitorAccessibilityService : AccessibilityService() {
          * 查任何第三方 App 都返回 null（连抖音都被误杀），且桌面本身也没有桌面图标，故弃用。
          */
         private val OVERLAY_PACKAGES = setOf("com.android.systemui", "android")
+
+        /** 一次滑动的滚动事件去抖窗口（毫秒）。 */
+        private const val SCROLL_DEBOUNCE_MS = 600L
+        private var lastScrollMs = 0L
 
         private fun isOverlay(pkg: String): Boolean =
             pkg == "com.xianying.app" ||

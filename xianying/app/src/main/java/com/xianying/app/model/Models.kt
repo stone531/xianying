@@ -39,5 +39,16 @@ enum class TargetApp(val packages: Set<String>, val label: String, val emoji: St
     }
 }
 
-/** 本次会话额度（毫秒）。quotaMs <= 0 视为未设限，不建立会话。 */
-data class SessionConfig(val quotaMs: Long)
+/**
+ * 管控模式（规格四种，MVP 实现前三种；双重限制为后续迭代）：
+ * DURATION  仅时长：目标 App 前台累计时长达 quotaMs 触发戒断
+ * COUNT     仅条数：有效观看（≥5秒）视频数达 maxVideos 触发戒断
+ * UNLIMITED 无限次：本次会话不管控
+ */
+enum class ControlMode { DURATION, COUNT, UNLIMITED }
+
+/**
+ * 本次会话额度。quotaMs<=0 表示不限时长；maxVideos<=0 表示不限条数；
+ * 两者都 <=0（未设限）不建立会话。
+ */
+data class SessionConfig(val quotaMs: Long, val maxVideos: Int = 0)
