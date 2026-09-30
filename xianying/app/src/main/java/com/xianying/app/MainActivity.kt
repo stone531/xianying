@@ -94,12 +94,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun saveTarget(sp: SharedPreferences, app: TargetApp, on: Boolean) {
-    sp.edit().putBoolean("target_${app.name}", on).apply()
-    Runtime.enabledTargets = TargetApp.entries.filter {
-        sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
-    }.toSet()
-}
 
 /**
  * 开关配色语义：开启 = 绿色（监控生效）；总开关开启后被锁定 = 暗绿色
@@ -128,6 +122,10 @@ fun MainScreen() {
     var minutes by remember { mutableStateOf(sp.getInt("minutes", 10).coerceAtLeast(0).toString()) }
     var videos by remember { mutableStateOf(sp.getInt("videos", 10).coerceAtLeast(0).toString()) }
     var snap by remember { mutableStateOf(Runtime.sessionManager.snapshot()) }
+    // 目标集合镜像为 Compose 状态：点击开关立即刷新 UI（Runtime.enabledTargets
+    // 是普通集合，直接在组合中读取不会触发重组——曾致"点击快手开关无反应"假象）
+    var enabledTargets by remember { mutableStateOf(Runtime.enabledTargets) }
+    var projRunning by remember { mutableStateOf(MediaProjectionService.running) }
     @Suppress("UNUSED_EXPRESSION") MainActivity.refreshTick.value   // 读取以触发重组刷新权限状态
 
     val notifPermission = rememberLauncherForActivityResult(
@@ -147,6 +145,7 @@ fun MainScreen() {
     LaunchedEffect(Unit) {
         while (true) {
             snap = Runtime.sessionManager.snapshot()
+            projRunning = MediaProjectionService.running   // ④授权后回界面能实时变✅
             delay(1_000)
         }
     }
@@ -203,7 +202,7 @@ fun MainScreen() {
                     )
                     Text(
                         when {
-                            master && Runtime.enabledTargets.isEmpty() ->
+                            master && enabledTargets.isEmpty() ->
                                 "已开启 · 但未选择任何监控目标，监控不生效"
                             master -> "已开启 · 进入目标 App 即开始计时"
                             else -> "已关闭 · 开启前可修改目标与额度"
@@ -232,7 +231,7 @@ fun MainScreen() {
         // ---- 监控目标（总开关开启时锁定）----
         SectionCard("监控目标", if (master) "关闭总开关后可修改" else "开启即监控对应 App") {
             TargetApp.entries.forEach { app ->
-                val on = app in Runtime.enabledTargets
+                val on = app in enabledTargets
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -259,7 +258,13 @@ fun MainScreen() {
                         checked = on,
                         enabled = !master,      // 总开关开启时锁定（锁定但开启 = 暗绿）
                         colors = switchColors(),
-                        onCheckedChange = { saveTarget(sp, app, it) }
+                        onCheckedChange = { on ->
+                            sp.edit().putBoolean("target_${app.name}", on).apply()
+                            Runtime.enabledTargets = TargetApp.entries.filter {
+                                sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
+                            }.toSet()
+                            enabledTargets = Runtime.enabledTargets   // 立即刷新 UI
+                        }
                     )
                 }
             }
@@ -371,7 +376,7 @@ fun MainScreen() {
             }
             // ④ 仅条数模式需要：抖音不发滚动事件，只能靠画面变化识别切换。
             // 授权后状态栏会常驻系统录屏图标（系统规定），低清采样不保存画面。
-            PermissionRow("④ 画面识别（仅条数模式用）", MediaProjectionService.running) {
+            PermissionRow("④ 画面识别（仅条数模式用）", projRunning) {
                 projectionLauncher.launch(
                     ctx.getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent()
                 )
