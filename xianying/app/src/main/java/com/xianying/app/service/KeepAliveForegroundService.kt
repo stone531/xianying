@@ -71,7 +71,12 @@ class KeepAliveForegroundService : Service() {
         // 状态机 → 常驻通知文案
         Runtime.sessionManager.listener = { snap ->
             updateNotification(notificationText(snap))
-            if (snap.status != Status.WARNING) stopWarningVibration()
+            if (snap.status == Status.WARNING) {
+                updateWarningNotification(snap.warningRemainingMs)   // 倒计时逐秒刷新
+            } else {
+                stopWarningVibration()
+                cancelWarningNotification()     // 警告结束（退出/会话终止）即撤掉警告通知，不能赖着不走
+            }
         }
         // 分级戒断 · 第一级：剩 1 分钟 → 顶部横幅预警（不遮挡、几秒自动消失）
         Runtime.sessionManager.warnListener = { showPreWarning() }
@@ -112,24 +117,40 @@ class KeepAliveForegroundService : Service() {
 
     /** 第二级全屏警告：全屏 Intent 拉起警告页 + 震动 + 提示音（fail-open：页面被拦也不影响到点退出）。 */
     private fun showWarningBlast() {
-        val fullScreen = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, WarningActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val n = Notification.Builder(this, WARN_CHANNEL_ID)
-            .setContentTitle("限映 · 本次额度已用完")
-            .setContentText("10 秒后自动返回桌面")
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setCategory(Notification.CATEGORY_ALARM)
-            .setContentIntent(fullScreen)
-            .setFullScreenIntent(fullScreen, true)  // 亮屏时直接拉起全屏警告页
-            .setOngoing(true)
-            .build()
+        val n = buildWarningNotification(10_000L, withFullScreenIntent = true)
         getSystemService(NotificationManager::class.java).notify(WARN_NOTI_ID + 1, n)
 
         startWarningVibration()
         playWarningTone()
+    }
+
+    /** 警告期每秒刷新倒计时文案（复用同一条通知，不重复弹横幅）。 */
+    private fun updateWarningNotification(remainingMs: Long) {
+        val n = buildWarningNotification(remainingMs, withFullScreenIntent = false)
+        getSystemService(NotificationManager::class.java).notify(WARN_NOTI_ID + 1, n)
+    }
+
+    private fun cancelWarningNotification() {
+        getSystemService(NotificationManager::class.java).cancel(WARN_NOTI_ID + 1)
+    }
+
+    private fun buildWarningNotification(remainingMs: Long, withFullScreenIntent: Boolean): Notification {
+        val builder = Notification.Builder(this, WARN_CHANNEL_ID)
+            .setContentTitle("限映 · 本次额度已用完")
+            .setContentText("${(remainingMs + 999) / 1000} 秒后自动返回桌面")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setCategory(Notification.CATEGORY_ALARM)
+            .setOngoing(true)
+        if (withFullScreenIntent) {
+            val fullScreen = PendingIntent.getActivity(
+                this, 0,
+                Intent(this, WarningActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.setContentIntent(fullScreen)
+            builder.setFullScreenIntent(fullScreen, true)   // 支持的 ROM 直接盖屏警告页
+        }
+        return builder.build()
     }
 
     /** 警告期震动：脉冲波形循环，状态离开 WARNING 时停止。 */
@@ -193,6 +214,7 @@ class KeepAliveForegroundService : Service() {
     override fun onDestroy() {
         running = false
         stopWarningVibration()
+        cancelWarningNotification()
         scope.cancel()
         Runtime.sessionManager.listener = null
         Runtime.sessionManager.warnListener = null
