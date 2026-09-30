@@ -12,3 +12,6 @@ xianying/.kotlin/
 # 垃圾文件
 bash.exe.stackdump
 Thumbs.db
+
+# Claude Code 本地配置
+.claude/
