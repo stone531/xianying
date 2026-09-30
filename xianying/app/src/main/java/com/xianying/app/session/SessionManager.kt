@@ -41,6 +41,7 @@ class SessionManager(
         remainingMs = if (status == Status.TIMING || status == Status.PAUSED) remainingMs else 0L,
     )
 
+
     /** 主界面设置额度。仅对"下一次新会话"生效，不打断进行中的会话。 */
     fun configure(quotaMs: Long) {
         this.quotaMs = quotaMs

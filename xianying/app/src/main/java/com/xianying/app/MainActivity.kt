@@ -1,8 +1,10 @@
 package com.xianying.app
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +16,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,10 +26,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -39,9 +49,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.xianying.app.model.TargetApp
 import com.xianying.app.runtime.Runtime
 import com.xianying.app.service.KeepAliveForegroundService
 import com.xianying.app.service.MonitorAccessibilityService
@@ -49,10 +62,6 @@ import com.xianying.app.session.Status
 import com.xianying.app.ui.theme.限映Theme
 import kotlinx.coroutines.delay
 
-/**
- * 主界面（降级版 MVP）：总开关 + 预设额度 + 权限引导 + 会话状态 + 调试区。
- * 打开本页 = 激活 Runtime 接线并恢复上次的设置。
- */
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -66,12 +75,11 @@ class MainActivity : ComponentActivity() {
         Runtime.appContext = applicationContext
         // 恢复上次设置（重启手机后打开一次本页即恢复监控）
         val sp = getSharedPreferences("xianying", Context.MODE_PRIVATE)
-        Runtime.targetOverride = sp.getString("override_pkg", "")?.ifBlank { null }
-        Runtime.sessionManager.configure(sp.getInt("minutes", 15) * 60_000L)
+        restoreTargets(sp)
+        Runtime.sessionManager.configure(sp.getInt("minutes", 10) * 60_000L)
         if (sp.getBoolean("master", false)) {
             KeepAliveForegroundService.start(this)
         }
-
         setContent {
             限映Theme {
                 Surface(Modifier.fillMaxSize()) { MainScreen() }
@@ -85,18 +93,29 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private fun restoreTargets(sp: SharedPreferences) {
+    Runtime.enabledTargets = TargetApp.entries.filter {
+        sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
+    }.toSet()
+}
+
+private fun saveTarget(sp: SharedPreferences, app: TargetApp, on: Boolean) {
+    sp.edit().putBoolean("target_${app.name}", on).apply()
+    Runtime.enabledTargets = TargetApp.entries.filter {
+        sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
+    }.toSet()
+}
+
 @Composable
 fun MainScreen() {
     val ctx = LocalContext.current
     val sp = ctx.getSharedPreferences("xianying", Context.MODE_PRIVATE)
 
     var master by remember { mutableStateOf(sp.getBoolean("master", false)) }
-    var minutes by remember { mutableStateOf(sp.getInt("minutes", 15).toString()) }
-    var overridePkg by remember { mutableStateOf(sp.getString("override_pkg", "") ?: "") }
+    var minutes by remember { mutableStateOf(sp.getInt("minutes", 10).toString()) }
     var snap by remember { mutableStateOf(Runtime.sessionManager.snapshot()) }
     @Suppress("UNUSED_EXPRESSION") MainActivity.refreshTick.value   // 读取以触发重组刷新权限状态
 
-    // 通知权限（Android 13+ 需运行时申请）
     val notifPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
@@ -109,126 +128,209 @@ fun MainScreen() {
         }
     }
 
-    fun applyQuota() {
-        val m = minutes.toLongOrNull() ?: 0L
-        sp.edit().putInt("minutes", m.toInt()).apply()
-        Runtime.sessionManager.configure(if (m > 0) m * 60_000 else 0L)
+    fun applyQuota(m: String = minutes) {
+        val v = m.toLongOrNull() ?: 0L
+        minutes = m
+        sp.edit().putInt("minutes", v.toInt()).apply()
+        Runtime.sessionManager.configure(if (v > 0) v * 60_000 else 0L)
     }
 
     Column(
         Modifier.fillMaxSize()
-            .padding(20.dp)
-            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
-        // ---- 标题 + 总开关 ----
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("限映", style = MaterialTheme.typography.headlineLarge)
-            Spacer(Modifier.weight(1f))
-            Text("总开关")
-            Switch(checked = master, onCheckedChange = { on ->
-                master = on
-                sp.edit().putBoolean("master", on).apply()
-                if (on) {
-                    applyQuota()
-                    KeepAliveForegroundService.start(ctx)
-                    if (Build.VERSION.SDK_INT >= 33) {
-                        notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                } else {
-                    KeepAliveForegroundService.stop(ctx)
-                    Runtime.sessionManager.reset()
-                }
-            })
-        }
+        // ---- 标题 ----
+        Text("限映", style = MaterialTheme.typography.headlineLarge)
         Text(
-            if (master) "监控已开启：进入抖音即开始计时" else "监控已关闭",
-            style = MaterialTheme.typography.bodySmall
+            "短视频使用额度 · 自主管控",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(Modifier.height(16.dp))
-
-        // ---- 预设额度 ----
-        Text("每次额度（分钟）", style = MaterialTheme.typography.titleMedium)
-        Text("新会话生效；进行中的会话不受影响", style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(
-            value = minutes,
-            onValueChange = { v ->
-                minutes = v.filter { it.isDigit() }.take(3)
-                applyQuota()
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        // ---- 总开关（大卡片）----
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // ---- 当前会话状态 ----
-        Text("当前会话", style = MaterialTheme.typography.titleMedium)
-        Text(
-            when (snap.status) {
-                Status.IDLE -> "空闲（未计时）"
-                Status.TIMING -> "计时中 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
-                Status.PAUSED -> "已暂停 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒（额度保留）"
-            },
-            style = MaterialTheme.typography.bodyLarge,
-        )
-
-        Spacer(Modifier.height(16.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(16.dp))
-
-        // ---- 权限引导 ----
-        Text("权限状态", style = MaterialTheme.typography.titleMedium)
-        val a11yOk = accessibilityEnabled(ctx)
-        val notifOk = ctx.getSystemService(android.app.NotificationManager::class.java)
-            .areNotificationsEnabled()
-        val batteryOk = ctx.getSystemService(PowerManager::class.java)
-            .isIgnoringBatteryOptimizations(ctx.packageName)
-        PermissionRow("① 无障碍服务（必须——识别与返回桌面）", a11yOk) {
-            ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }
-        PermissionRow("② 通知（显示剩余时间）", notifOk) {
-            if (Build.VERSION.SDK_INT >= 33) {
-                notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            } else {
-                openAppDetails(ctx)
+            colors = CardDefaults.cardColors(
+                containerColor = if (master)
+                    MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Row(
+                Modifier.padding(20.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "监控总开关",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        if (master) "已开启 · 进入目标 App 即开始计时"
+                        else "已关闭 · 开启前可修改目标与额度",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = master, onCheckedChange = { on ->
+                    master = on
+                    sp.edit().putBoolean("master", on).apply()
+                    if (on) {
+                        KeepAliveForegroundService.start(ctx)
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    } else {
+                        KeepAliveForegroundService.stop(ctx)
+                        Runtime.sessionManager.reset()
+                    }
+                })
             }
         }
-        PermissionRow("③ 电池优化白名单（建议——防杀后台）", batteryOk) {
-            ctx.startActivity(
-                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:${ctx.packageName}"))
+
+        // ---- 监控目标（总开关开启时锁定）----
+        SectionCard("监控目标", if (master) "关闭总开关后可修改" else "开启即监控对应 App") {
+            TargetApp.entries.forEach { app ->
+                val on = app in Runtime.enabledTargets
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(app.emoji, fontSize = 22.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(app.label, style = MaterialTheme.typography.titleMedium)
+                            if (app != TargetApp.DOUYIN) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "包号待真机验证",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
+                        }
+                        Text(
+                            app.packageName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = on,
+                        enabled = !master,      // 总开关开启时锁定
+                        onCheckedChange = { saveTarget(sp, app, it) }
+                    )
+                }
+            }
+        }
+
+        // ---- 每次额度（总开关开启时锁定）----
+        SectionCard("每次额度", if (master) "关闭总开关后可修改" else "对下一次进入目标 App 生效") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(5, 10, 15, 30).forEach { p ->
+                    FilterChip(
+                        selected = minutes == p.toString(),
+                        enabled = !master,      // 总开关开启时锁定
+                        onClick = { applyQuota(p.toString()) },
+                        label = { Text("$p 分") }
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = minutes,
+                onValueChange = { v ->
+                    val f = v.filter { it.isDigit() }.take(3)
+                    if (f.isNotEmpty()) applyQuota(f)
+                },
+                enabled = !master,             // 总开关开启时锁定
+                label = { Text("自定义分钟数") },
+                suffix = { Text("分钟") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
         }
 
-        Spacer(Modifier.height(16.dp))
-        HorizontalDivider()
-        Spacer(Modifier.height(16.dp))
+        // ---- 当前会话 ----
+        SectionCard("当前会话", null) {
+            val (dot, text) = when (snap.status) {
+                Status.IDLE -> Color(0xFF9E9E9E) to "空闲 · 未计时"
+                Status.TIMING -> Color(0xFF4CAF50) to
+                    "计时中 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
+                Status.PAUSED -> Color(0xFFFF9800) to
+                    "已暂停 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒（额度保留）"
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(12.dp)
+                        .background(dot, CircleShape)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(text, style = MaterialTheme.typography.titleMedium)
+            }
+        }
 
-        // ---- 调试区：替身包名 + 事件日志 ----
-        Text("调试区（模拟器测试用）", style = MaterialTheme.typography.titleMedium)
-        Text("替身包名：留空 = 正式模式（抖音）", style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(
-            value = overridePkg,
-            onValueChange = { v ->
-                overridePkg = v.trim()
-                sp.edit().putString("override_pkg", overridePkg).apply()
-                Runtime.targetOverride = overridePkg.ifBlank { null }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text("如 com.android.chrome") },
-        )
+        // ---- 权限 ----
+        SectionCard("权限状态", null) {
+            val a11yOk = accessibilityEnabled(ctx)
+            val notifOk = ctx.getSystemService(NotificationManager::class.java)
+                .areNotificationsEnabled()
+            val batteryOk = ctx.getSystemService(PowerManager::class.java)
+                .isIgnoringBatteryOptimizations(ctx.packageName)
+            PermissionRow("① 无障碍服务（识别与返回桌面）", a11yOk) {
+                ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            PermissionRow("② 通知（显示剩余时间）", notifOk) {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    openAppDetails(ctx)
+                }
+            }
+            PermissionRow("③ 电池优化白名单（防杀后台）", batteryOk) {
+                ctx.startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:${ctx.packageName}"))
+                )
+            }
+        }
 
-        Spacer(Modifier.height(8.dp))
-        Text("窗口切换事件日志（最近 30 条）", style = MaterialTheme.typography.titleSmall)
-        Text(
-            MonitorAccessibilityService.recentEvents.toList().takeLast(30)
-                .joinToString("\n") { it },
-            style = MaterialTheme.typography.bodySmall,
+        // ---- 调试：事件日志 ----
+        SectionCard("窗口切换事件（调试，最近 30 条）", null) {
+            Text(
+                MonitorAccessibilityService.recentEvents.toList().takeLast(30)
+                    .joinToString("\n") { it },
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/** 统一的分区卡片：标题 + 副标题（可空）+ 内容。 */
+@Composable
+private fun SectionCard(title: String, subtitle: String?, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         )
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            content()
+        }
     }
 }
 

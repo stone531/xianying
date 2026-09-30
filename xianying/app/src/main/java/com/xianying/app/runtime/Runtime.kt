@@ -14,7 +14,7 @@ object Runtime {
 
     val clock = SystemElapsedClock()
 
-    /** 状态机唯一实例；目标判定走 isTarget（支持测试替身包名）。 */
+    /** 状态机唯一实例；目标判定走 isTarget（按主界面启用的目标集合）。 */
     val sessionManager: SessionManager by lazy { SessionManager(clock, ::isTarget) }
 
     /** 无障碍服务实例；系统连接后置入，断开置空。 */
@@ -23,15 +23,12 @@ object Runtime {
     /** App 全局 Context；MainActivity 创建时置入。 */
     @Volatile var appContext: Context? = null
 
-    /**
-     * 测试替身包名（模拟器上用 Chrome 等冒充抖音跑闭环）。
-     * null/空 = 正式模式（抖音包名表）。由主界面"调试区"设置。
-     */
-    @Volatile var targetOverride: String? = null
+    /** 已启用的监控目标集合（主界面开关控制，持久化在 SharedPreferences）。 */
+    @Volatile var enabledTargets: Set<TargetApp> = setOf(TargetApp.DOUYIN)
 
+    /** 前台包名 ∈ 启用目标 → 是监控对象。 */
     fun isTarget(pkg: String?): Boolean {
-        val o = targetOverride
-        return if (o.isNullOrBlank()) TargetApp.fromPackage(pkg) != null
-        else pkg == o
+        val t = TargetApp.fromPackage(pkg) ?: return false
+        return t in enabledTargets
     }
 }
