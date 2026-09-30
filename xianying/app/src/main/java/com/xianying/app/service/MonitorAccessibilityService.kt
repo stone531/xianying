@@ -45,7 +45,8 @@ class MonitorAccessibilityService : AccessibilityService() {
         log(pkg)
         if (Runtime.isTarget(pkg)) Runtime.lastTargetPkg = pkg   // 记住息屏前在刷哪个 App
         android.util.Log.d("XianyingEye",
-            "event pkg=$pkg isTarget=${Runtime.isTarget(pkg)} status=${Runtime.sessionManager.snapshot().status}")
+            "event pkg=$pkg cls=${event.className} isTarget=${Runtime.isTarget(pkg)} " +
+                "status=${Runtime.sessionManager.snapshot().status}")
         Runtime.sessionManager.onForegroundChanged(pkg)
         android.util.Log.d("XianyingEye",
             "after status=${Runtime.sessionManager.snapshot().status}")
