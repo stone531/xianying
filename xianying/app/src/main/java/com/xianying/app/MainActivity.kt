@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -95,6 +96,18 @@ private fun saveTarget(sp: SharedPreferences, app: TargetApp, on: Boolean) {
     }.toSet()
 }
 
+/**
+ * 开关配色语义：开启 = 绿色（监控生效）；总开关开启后被锁定 = 暗绿色
+ * （区别于系统默认的死灰——暗绿传达"仍处于开启、只是暂时锁定"）。关 = 默认灰。
+ */
+@Composable
+private fun switchColors() = SwitchDefaults.colors(
+    checkedTrackColor = Color(0xFF4CAF50),
+    checkedThumbColor = Color.White,
+    disabledCheckedTrackColor = Color(0xFF2E7D32),
+    disabledCheckedThumbColor = Color(0xFFC8E6C9),
+)
+
 @Composable
 fun MainScreen() {
     val ctx = LocalContext.current
@@ -141,13 +154,12 @@ fun MainScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // ---- 总开关（大卡片）----
+        // ---- 总开关（大卡片）：开启=绿色，关闭=灰色 ----
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = if (master)
-                    MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant
+                containerColor = if (master) Color(0xFFDDF0DD)   // 浅绿：一眼看出监控在工作
+                else MaterialTheme.colorScheme.surfaceVariant     // 灰：未启用
             )
         ) {
             Row(
@@ -166,7 +178,7 @@ fun MainScreen() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(checked = master, onCheckedChange = { on ->
+                Switch(checked = master, colors = switchColors(), onCheckedChange = { on ->
                     master = on
                     sp.edit().putBoolean("master", on).apply()
                     if (on) {
@@ -210,7 +222,8 @@ fun MainScreen() {
                     }
                     Switch(
                         checked = on,
-                        enabled = !master,      // 总开关开启时锁定
+                        enabled = !master,      // 总开关开启时锁定（锁定但开启 = 暗绿）
+                        colors = switchColors(),
                         onCheckedChange = { saveTarget(sp, app, it) }
                     )
                 }
