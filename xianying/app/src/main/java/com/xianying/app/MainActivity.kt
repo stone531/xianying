@@ -34,7 +34,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -102,7 +101,7 @@ fun MainScreen() {
     val sp = ctx.getSharedPreferences("xianying", Context.MODE_PRIVATE)
 
     var master by remember { mutableStateOf(sp.getBoolean("master", false)) }
-    var minutes by remember { mutableStateOf(sp.getInt("minutes", 10).toString()) }
+    var minutes by remember { mutableStateOf(sp.getInt("minutes", 10).coerceAtLeast(0).toString()) }
     var snap by remember { mutableStateOf(Runtime.sessionManager.snapshot()) }
     @Suppress("UNUSED_EXPRESSION") MainActivity.refreshTick.value   // 读取以触发重组刷新权限状态
 
@@ -118,11 +117,13 @@ fun MainScreen() {
         }
     }
 
-    fun applyQuota(m: String = minutes) {
-        val v = m.toLongOrNull() ?: 0L
-        minutes = m
-        sp.edit().putInt("minutes", v.toInt()).apply()
-        Runtime.sessionManager.configure(if (v > 0) v * 60_000 else 0L)
+    /** 额度自由输入（规格：无预设选项）：仅数字，最多 3 位；空 = 不设限（无限次模式）。 */
+    fun applyQuota(input: String) {
+        val f = input.filter { it.isDigit() }.take(3)
+        minutes = f
+        val n = f.toIntOrNull() ?: 0
+        sp.edit().putInt("minutes", n).apply()
+        Runtime.sessionManager.configure(if (n > 0) n * 60_000L else 0L)
     }
 
     Column(
@@ -216,27 +217,15 @@ fun MainScreen() {
             }
         }
 
-        // ---- 每次额度（总开关开启时锁定）----
+        // ---- 每次额度（总开关开启时锁定；规格：自由输入，无预设选项）----
         SectionCard("每次额度", if (master) "关闭总开关后可修改" else "对下一次进入目标 App 生效") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(5, 10, 15, 30).forEach { p ->
-                    FilterChip(
-                        selected = minutes == p.toString(),
-                        enabled = !master,      // 总开关开启时锁定
-                        onClick = { applyQuota(p.toString()) },
-                        label = { Text("$p 分") }
-                    )
-                }
-            }
             OutlinedTextField(
                 value = minutes,
-                onValueChange = { v ->
-                    val f = v.filter { it.isDigit() }.take(3)
-                    if (f.isNotEmpty()) applyQuota(f)
-                },
+                onValueChange = { applyQuota(it) },
                 enabled = !master,             // 总开关开启时锁定
-                label = { Text("自定义分钟数") },
+                label = { Text("分钟数") },
                 suffix = { Text("分钟") },
+                supportingText = { Text("1~999 自由输入；留空 = 不设限（无限次模式）") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
