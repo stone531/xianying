@@ -58,6 +58,7 @@ class SessionManager(
     /** pkg = 当前前台包名；目标之外任意值（含 null）都算"离开目标"。 */
     fun onForegroundChanged(pkg: String?) {
         val isTarget = isTargetPackage(pkg)
+        println("XianyingSM: onForegroundChanged pkg=$pkg isTarget=$isTarget inTarget=$inTarget status=$status quota=$quotaMs")
         if (isTarget == inTarget) return                     // 幂等：状态没变就不动
         inTarget = isTarget
         when {

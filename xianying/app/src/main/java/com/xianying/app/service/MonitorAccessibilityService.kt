@@ -38,7 +38,11 @@ class MonitorAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) return          // 忽略自己界面的窗口事件
         log(pkg)
+        android.util.Log.d("XianyingEye",
+            "event pkg=$pkg isTarget=${Runtime.isTarget(pkg)} status=${Runtime.sessionManager.snapshot().status}")
         Runtime.sessionManager.onForegroundChanged(pkg)
+        android.util.Log.d("XianyingEye",
+            "after status=${Runtime.sessionManager.snapshot().status}")
     }
 
     override fun onInterrupt() { /* 系统中断无障碍服务时回调，无需处理 */ }
