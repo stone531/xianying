@@ -72,12 +72,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        Runtime.appContext = applicationContext
         // 恢复上次设置（重启手机后打开一次本页即恢复监控）
-        val sp = getSharedPreferences("xianying", Context.MODE_PRIVATE)
-        restoreTargets(sp)
-        Runtime.sessionManager.configure(sp.getInt("minutes", 10) * 60_000L)
-        if (sp.getBoolean("master", false)) {
+        if (Runtime.restoreFromPrefs(this)) {
             KeepAliveForegroundService.start(this)
         }
         setContent {
@@ -91,12 +87,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         refreshTick.value++
     }
-}
-
-private fun restoreTargets(sp: SharedPreferences) {
-    Runtime.enabledTargets = TargetApp.entries.filter {
-        sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
-    }.toSet()
 }
 
 private fun saveTarget(sp: SharedPreferences, app: TargetApp, on: Boolean) {
@@ -204,17 +194,15 @@ fun MainScreen() {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(app.label, style = MaterialTheme.typography.titleMedium)
-                            if (app != TargetApp.DOUYIN) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "包号待真机验证",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (app == TargetApp.DOUYIN) "极速/火山包号待验证" else "包号待真机验证",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
                         }
                         Text(
-                            app.packageName,
+                            app.packages.joinToString("\n"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
