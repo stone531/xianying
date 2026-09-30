@@ -129,4 +129,26 @@ class SessionManagerTest {
         assertEquals(Status.PAUSED, m.snapshot().status)
         assertEquals(5 * 60_000L - 1_000, m.snapshot().remainingMs)
     }
+
+    // ---- 总开关 ----
+
+    @Test fun reset_endsSessionImmediately() {
+        m.configure(5 * 60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(30_000)
+        m.reset()
+        assertEquals(Status.IDLE, m.snapshot().status)
+        assertEquals(0L, m.snapshot().remainingMs)
+    }
+
+    // ---- 测试替身包名 ----
+
+    @Test fun overridePredicate_treatsSubstituteAsTarget() {
+        val m2 = SessionManager(clock) { it == "com.android.chrome" }
+        m2.configure(60_000L)
+        m2.onForegroundChanged("com.ss.android.ugc.aweme")  // 正式抖音包名不算
+        assertEquals(Status.IDLE, m2.snapshot().status)
+        m2.onForegroundChanged("com.android.chrome")        // 替身包名算
+        assertEquals(Status.TIMING, m2.snapshot().status)
+    }
 }

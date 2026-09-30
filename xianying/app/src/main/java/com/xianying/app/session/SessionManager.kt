@@ -47,6 +47,14 @@ class SessionManager(
         if (quotaMs <= 0 && status == Status.IDLE) emit()   // 清零额度 → 关闭管控
     }
 
+    /** 总开关关闭时调用：立即终止当前会话（剩余额度作废），回到 IDLE。 */
+    fun reset() {
+        status = Status.IDLE
+        remainingMs = 0
+        inTarget = false
+        emit()
+    }
+
     /** pkg = 当前前台包名；目标之外任意值（含 null）都算"离开目标"。 */
     fun onForegroundChanged(pkg: String?) {
         val isTarget = isTargetPackage(pkg)
