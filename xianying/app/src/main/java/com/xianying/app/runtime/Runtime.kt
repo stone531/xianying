@@ -31,4 +31,19 @@ object Runtime {
         val t = TargetApp.fromPackage(pkg) ?: return false
         return t in enabledTargets
     }
+
+    /**
+     * 从本地设置恢复运行状态（幂等，可重复调用）。
+     * 两个调用时机：① 主界面启动 ② 无障碍服务被系统重新绑定（进程被杀后自愈）。
+     * 返回总开关状态，调用方据此决定是否拉起前台服务。
+     */
+    fun restoreFromPrefs(context: Context): Boolean {
+        appContext = context.applicationContext
+        val sp = context.getSharedPreferences("xianying", Context.MODE_PRIVATE)
+        enabledTargets = TargetApp.entries.filter {
+            sp.getBoolean("target_${it.name}", it == TargetApp.DOUYIN)
+        }.toSet()
+        sessionManager.configure(sp.getInt("minutes", 10) * 60_000L)
+        return sp.getBoolean("master", false)
+    }
 }

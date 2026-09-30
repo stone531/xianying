@@ -31,6 +31,18 @@ class MonitorAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Runtime.monitorService = this
+        // 自愈：进程被系统杀掉后，只要无障碍仍启用，系统会重新绑定本服务。
+        // 借这个时机恢复设置，并按总开关状态重新拉起前台服务（倒计时心脏），
+        // 避免"总开关开着但监控悄悄失效"。恢复是幂等的，主界面启动时也会做一遍。
+        try {
+            val master = Runtime.restoreFromPrefs(this)
+            if (master && !KeepAliveForegroundService.running) {
+                KeepAliveForegroundService.start(this)
+            }
+        } catch (e: Exception) {
+            // 自愈失败不影响事件监听本身（fail-open：工具故障不妨碍正常用机）
+            android.util.Log.e("XianyingEye", "self-heal failed", e)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
