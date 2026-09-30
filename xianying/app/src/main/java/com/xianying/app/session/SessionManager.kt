@@ -92,7 +92,6 @@ class SessionManager(
     /** pkg = 当前前台包名；目标之外任意值（含 null）都算"离开目标"。 */
     @Synchronized fun onForegroundChanged(pkg: String?) {
         val isTarget = isTargetPackage(pkg)
-        println("XianyingSM: onForegroundChanged pkg=$pkg isTarget=$isTarget inTarget=$inTarget status=$status quota=$quotaMs")
         if (isTarget == inTarget) return                     // 幂等：状态没变就不动
         // 警告期（10 秒缓冲）任何"离开"事件都忽略：全屏警告通知自身的 systemui 横幅、
         // 系统对话框都会产生窗口事件，若当作离开会把 WARNING 打断成 IDLE，退出动作永远不执行

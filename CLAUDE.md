@@ -40,18 +40,19 @@ Android 工程位于 `xianying/` 子目录（包名 `com.xianying.app`，minSdk 
 
 ```powershell
 cd xianying
-.\gradlew.bat assembleDebug                          # 构建 APK
+.\gradlew.bat assembleDebug                          # 开发调试 APK
+.\gradlew.bat assembleRelease                        # 真机测试用签名 APK
 .\gradlew.bat test                                   # 全部单元测试（纯 JVM，无需设备）
 .\gradlew.bat test --tests "com.xianying.app.session.SessionManagerTest"   # 单个测试类
 ```
 
-- APK 产物：`xianying/app/build/outputs/apk/debug/app-debug.apk`
+- **真机 APK 产物**：`xianying/app/build/outputs/apk/release/app-release.apk`（release 已配自签：keystore `xianying/xianying-release.keystore`，密码在 `app/build.gradle.kts`；与 debug 签名不同，两者不能覆盖互装）
 - 首次构建需下载依赖，可能超过 10 分钟，超时属正常
 
 ## 测试与调试约束（重要）
 
 - **测试顺序（2026-09-30 定）：模拟器先行，真机终验**。用 Android Studio 自带 AVD 模拟器做开发期主力自测。早期用替身 App（Chrome/设置）当目标；后期已装真实抖音 APK（`apps/` 下的官方安装包）完成全闭环验证。注意抖音有模拟器检测，装前先确认该 APK 版本可用
-- **真机只验模拟器验不了的**：厂商 ROM 杀后台/电池白名单、`GLOBAL_ACTION_HOME` 真机表现、快手/B站包名核对、帧差阈值真机调参。真机不便连线，不依赖 adb/logcat：本机 `assembleDebug` 出 APK → 微信/QQ 传手机安装 → 用户按 `TESTING.md` 手测清单自测反馈
+- **真机只验模拟器验不了的**：厂商 ROM 杀后台/电池白名单、`GLOBAL_ACTION_HOME` 真机表现、快手/B站包名核对、帧差阈值真机调参。真机不便连线，不依赖 adb/logcat：本机 `assembleRelease` 出 APK → 微信/QQ 传手机安装 → 用户按 `TESTING.md` 手测清单自测反馈
 - **替代 logcat 的调试手段**：`MonitorAccessibilityService.recentEvents` 环形日志（最近 200 条窗口切换事件）显示在主界面调试区
 - **单元测试全部纯 JVM**：`SessionManager` 是不依赖 Android 的纯 Kotlin 状态机，时间源走注入的 `Clock` 接口（实现必须基于 `elapsedRealtime` 单调时钟），测试用 `FakeClock` 模拟快进
 - 每 Task 完成即 commit（实现计划中含各 Task 的提交信息）

@@ -19,8 +19,19 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // 自签证书（自用侧载，不上商店）：keytool 生成，密码写死无泄露风险（仓库私有）
+        create("release") {
+            storeFile = file("../xianying-release.keystore")
+            storePassword = "xianying-mvp-2026"
+            keyAlias = "xianying"
+            keyPassword = "xianying-mvp-2026"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = false
             }
