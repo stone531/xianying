@@ -2,9 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 悬浮窗（后续增强用）；震动提示属预警层，MVP 未用 -->
+    <!-- 悬浮窗（后续增强用）；VIBRATE = 分级戒断警告期震动；FULL_SCREEN_INTENT = 额度用完拉起全屏警告页 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -30,6 +32,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 全屏警告页：额度用完的 10 秒缓冲期倒计时（由前台服务的全屏 Intent 通知拉起） -->
+        <activity
+            android:name=".ui.WarningActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.限映" />
 
         <!-- 无障碍监控服务：识别前台 App + 执行返回桌面 -->
         <service

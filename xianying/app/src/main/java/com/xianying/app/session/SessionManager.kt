@@ -11,12 +11,14 @@ import com.xianying.app.model.TargetApp
  *  - tick()：前台服务每秒调用，推进时间
  *  - configure(quotaMs)：主界面设置本次额度（对下一次新会话生效）
  *
- * 核心规则（降级版 MVP + 30 分钟脱离解除）：
+ * 核心规则（降级版 MVP + 30 分钟脱离解除 + 分级戒断）：
  *  - 进抖音且已有额度 → 开始/恢复倒计时
  *  - 离开抖音 → 暂停，剩余额度保留，同时开始累计脱离时长
  *  - 脱离中途切回抖音 → 脱离计时清零，沿用本次剩余额度
  *  - 脱离累计满 30 分钟 → 会话自动销毁（下次进入 = 全新会话拿满额度；人不在目标 App，不触发退出动作）
- *  - 额度归零（必然发生在抖音前台期间）→ 触发 exitListener（执行返回桌面）→ 会话结束
+ *  - 剩余额度降至预警线（默认 1 分钟）→ warnListener 触发一次（顶部轻量提示，不遮挡）
+ *  - 额度归零 → 进入 WARNING 缓冲期（默认 10 秒；warningListener 触发全屏警告+震动+提示音）
+ *  - 警告期结束 → exitListener（返回桌面）→ 会话结束；警告期内用户自己离开 → 会话结束，不触发退出
  *  - 结束后无冷却：再进抖音按当前预设额度开新会话（产品红线：自主管控，不强制封锁）
  */
 class SessionManager(
@@ -25,12 +27,22 @@ class SessionManager(
     private val isTargetPackage: (String?) -> Boolean = { TargetApp.fromPackage(it) != null },
     /** 脱离自动解除阈值（规格固定 30 分钟；构造参数化便于测试与后续调档）。 */
     private val awayLimitMs: Long = 30 * 60_000L,
+    /** 提前预警线：剩余额度降到此值触发一次预警（规格固定 1 分钟）。 */
+    private val warnAtMs: Long = 60_000L,
+    /** WARNING 警告期时长（规格固定 10 秒缓冲）。 */
+    private val warningMs: Long = 10_000L,
 ) {
 
     /** 每次状态/快照变化回调（含每秒 tick），供通知栏与主界面刷新。 */
     var listener: ((SessionSnapshot) -> Unit)? = null
 
-    /** 额度用尽时回调一次，由服务层执行"返回桌面"。 */
+    /** 剩余额度触及预警线时回调一次（每会话一次），服务层发顶部轻提示。 */
+    var warnListener: (() -> Unit)? = null
+
+    /** 进入 WARNING 警告期时回调一次，服务层弹全屏警告+震动+提示音。 */
+    var warningListener: (() -> Unit)? = null
+
+    /** 警告期结束、额度正式用尽时回调一次，由服务层执行"返回桌面"。 */
     var exitListener: (() -> Unit)? = null
 
     private var status = Status.IDLE
@@ -38,12 +50,15 @@ class SessionManager(
     private var remainingMs = 0L             // 本会话剩余额度
     private var inTarget = false             // 当前前台是否为目标 App
     private var awayMs = 0L                  // 本次脱离已累计时长（切回目标即清零）
+    private var warningTriggered = false     // 本会话预警是否已触发过（防重复）
+    private var warningRemainingMs = 0L      // WARNING 警告期剩余毫秒
     private var lastTickMs = clock.now()
 
     fun snapshot() = SessionSnapshot(
         status = status,
         config = if (status == Status.IDLE) null else SessionConfig(quotaMs),
         remainingMs = if (status == Status.TIMING || status == Status.PAUSED) remainingMs else 0L,
+        warningRemainingMs = if (status == Status.WARNING) warningRemainingMs else 0L,
     )
 
 
@@ -59,6 +74,7 @@ class SessionManager(
         remainingMs = 0
         inTarget = false
         awayMs = 0
+        warningRemainingMs = 0
         emit()
     }
 
@@ -74,33 +90,60 @@ class SessionManager(
         }
     }
 
+    /**
+     * 推进时间。dt 可能跨越多个阶段边界（如一次 tick 从计时期跨进警告期再到退出），
+     * 因此按阶段分段消耗，保证任意大小的 dt 状态流转都正确（真实心跳 1 秒一跳，测试会大跳步）。
+     */
     fun tick() {
-        val now = clock.now()
-        val dt = now - lastTickMs
-        lastTickMs = now
-        when (status) {
-            Status.TIMING -> {
-                remainingMs -= dt
-                if (remainingMs <= 0) {
-                    remainingMs = 0
-                    status = Status.IDLE
-                    inTarget = false    // 会话已终结；此后任何抖音事件都视为"新会话"（无冷却红线）
-                    awayMs = 0
-                    emit()
-                    exitListener?.invoke()                   // 服务层此刻执行返回桌面
-                    return
+        var dt = clock.now() - lastTickMs
+        lastTickMs += dt
+        while (dt > 0) {
+            val consumed = when (status) {
+                Status.TIMING -> {
+                    val step = minOf(dt, remainingMs)               // 最多用到归零
+                    remainingMs -= step
+                    dt -= step
+                    if (remainingMs <= 0L) {                        // 额度归零 → 分级戒断缓冲期
+                        remainingMs = 0L
+                        status = Status.WARNING
+                        warningRemainingMs = warningMs
+                        emit()
+                        warningListener?.invoke()                  // 全屏警告 + 震动 + 提示音
+                    } else if (!warningTriggered && remainingMs <= warnAtMs) {  // 提前预警（每会话一次）
+                        warningTriggered = true
+                        warnListener?.invoke()
+                    }
+                    step
                 }
-            }
-            Status.PAUSED -> {
-                awayMs += dt                                        // 脱离计时只在暂停期累计
-                if (awayMs >= awayLimitMs) {                        // 满 30 分钟：会话自动解除
-                    status = Status.IDLE
-                    remainingMs = 0
-                    awayMs = 0
-                    // 人已不在目标 App，无需执行返回桌面（不触发 exitListener）
+                Status.WARNING -> {
+                    val step = minOf(dt, warningRemainingMs)       // 最多到警告期结束
+                    warningRemainingMs -= step
+                    dt -= step
+                    if (warningRemainingMs <= 0L) {                 // 缓冲结束 → 正式退出
+                        warningRemainingMs = 0L
+                        status = Status.IDLE
+                        inTarget = false   // 会话已终结；此后任何抖音事件都视为"新会话"（无冷却红线）
+                        awayMs = 0
+                        emit()
+                        exitListener?.invoke()                     // 服务层此刻执行返回桌面
+                    }
+                    step
                 }
+                Status.PAUSED -> {
+                    val step = minOf(dt, awayLimitMs - awayMs)     // 最多到脱离解除线
+                    awayMs += step
+                    dt -= step
+                    if (awayMs >= awayLimitMs) {                    // 满 30 分钟：会话自动解除
+                        status = Status.IDLE
+                        remainingMs = 0
+                        awayMs = 0
+                        // 人已不在目标 App，无需执行返回桌面（不触发 exitListener）
+                    }
+                    step
+                }
+                Status.IDLE -> dt.also { dt = 0 }                   // 无会话：整段消耗掉
             }
-            Status.IDLE -> Unit
+            if (consumed <= 0L) break                               // 防御：避免异常状态下死循环
         }
         emit()
     }
@@ -111,6 +154,7 @@ class SessionManager(
             Status.IDLE ->
                 if (quotaMs > 0) {                           // 无额度（=未设限/关闭）则保持 IDLE
                     remainingMs = quotaMs
+                    warningTriggered = false                 // 新会话：预警标志复位
                     status = Status.TIMING
                     emit()
                 }
@@ -118,16 +162,23 @@ class SessionManager(
                 status = Status.TIMING
                 emit()
             }
-            Status.TIMING -> Unit                            // 不会发生（inTarget 已变化）
+            Status.TIMING, Status.WARNING -> Unit            // 不会发生（inTarget 已变化 / 警告期无重进）
         }
     }
 
     private fun onLeaveTarget() {
-        if (status == Status.TIMING) {
-            status = Status.PAUSED                           // 额度冻结
-            emit()
+        when (status) {
+            Status.TIMING -> {
+                status = Status.PAUSED                       // 额度冻结
+                emit()
+            }
+            Status.WARNING -> {                              // 警告期内用户自己走了：
+                status = Status.IDLE                         // 额度已用完，会话就地结束，
+                warningRemainingMs = 0                       // 不再触发返回桌面（人已离开）
+                emit()
+            }
+            Status.IDLE, Status.PAUSED -> Unit               // 离开目标无需处理
         }
-        // IDLE（无会话）离开目标：无需处理
     }
 
     private fun emit() { listener?.invoke(snapshot()) }

@@ -125,6 +125,95 @@ class SessionManagerTest {
         assertFalse(exited)                              // 人已不在抖音，不该执行"返回桌面"
     }
 
+    // ---- 分级戒断：剩余1分钟预警 + 10秒全屏警告缓冲 ----
+
+    /** 构造可调阈值的状态机：预警线 20s、警告期 5s，方便小额度测试。 */
+    private fun graded() =
+        SessionManager(
+            clock,
+            isTargetPackage = { it == "com.ss.android.ugc.aweme" },
+            awayLimitMs = 30 * 60_000L,
+            warnAtMs = 20_000L,
+            warningMs = 5_000L,
+        )
+
+    /** tick 重载：驱动指定状态机（graded() 构造的实例）。 */
+    private fun tick(m: SessionManager, ms: Long) { clock.advance(ms); m.tick() }
+
+    @Test fun remainingBelow1min_firesWarningOnce() {
+        var warned = 0
+        val m = graded()
+        m.warnListener = { warned++ }
+        m.configure(60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 40_000)                                  // 剩 20s：触及预警线
+        assertEquals(1, warned)
+        tick(m, 5_000)                                   // 继续计时不再重复预警
+        tick(m, 5_000)
+        assertEquals(1, warned)
+    }
+
+    @Test fun quotaExhausted_entersWarning_noImmediateExit() {
+        var exited = false
+        val m = graded()
+        m.exitListener = { exited = true }
+        m.configure(60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 60_000)                                  // 额度用完
+        val s = m.snapshot()
+        assertEquals(Status.WARNING, s.status)           // 先进入 10 秒警告期
+        assertEquals(5_000L, s.warningRemainingMs)
+        assertFalse(exited)                              // 还没回桌面（缓冲中）
+    }
+
+    @Test fun warningCountsDown_thenExits() {
+        var exited = 0
+        val m = graded()
+        m.exitListener = { exited++ }
+        m.configure(60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 60_000)                                  // 进 WARNING，剩 5s
+        tick(m, 3_000)
+        assertEquals(Status.WARNING, m.snapshot().status)
+        assertEquals(2_000L, m.snapshot().warningRemainingMs)
+        tick(m, 2_000)                                   // 警告期结束
+        assertEquals(Status.IDLE, m.snapshot().status)
+        assertEquals(1, exited)                          // 此刻才返回桌面
+        assertEquals(0L, m.snapshot().remainingMs)
+    }
+
+    @Test fun leaveDuringWarning_endsSession_withoutExit() {
+        var exited = false
+        val m = graded()
+        m.exitListener = { exited = true }
+        m.configure(60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 60_000)                                  // WARNING 中
+        m.onForegroundChanged("com.tencent.mm")          // 用户自己走了
+        assertEquals(Status.IDLE, m.snapshot().status)   // 会话结束
+        assertFalse(exited)                              // 不需要再轰回桌面
+        tick(m, 10_000)                                  // 不会再有任何动作
+        assertFalse(exited)
+    }
+
+    @Test fun warningFlagsReset_forNextSession() {
+        var warned = 0
+        val m = graded()
+        m.warnListener = { warned++ }
+        m.configure(60_000L)
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 40_000)                                  // 剩 20s：触发预警
+        assertEquals(1, warned)
+        tick(m, 25_000)                                  // 剩余 20s 用完 + 警告期 5s：第一会话结束
+        assertEquals(Status.IDLE, m.snapshot().status)
+        // WARNING 期结束时 inTarget 置 false；再进目标 = 新会话
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        assertEquals(Status.TIMING, m.snapshot().status)
+        assertEquals(60_000L, m.snapshot().remainingMs)  // 满额度新会话
+        tick(m, 40_000)                                  // 再次触及预警线
+        assertEquals(2, warned)                          // 新会话预警正常再触发
+    }
+
     // ---- 到点退出 ----
 
     @Test fun quotaExhausted_invokesExit_thenIdle() {
@@ -132,7 +221,10 @@ class SessionManagerTest {
         m.exitListener = { exited = true }
         m.configure(60_000L)
         m.onForegroundChanged("com.ss.android.ugc.aweme")
-        tick(60_000)                                     // 额度正好用完
+        tick(60_000)                                     // 额度正好用完 → 10 秒警告期（默认）
+        assertEquals(Status.WARNING, m.snapshot().status)
+        assertFalse(exited)
+        tick(10_000)                                     // 警告期走完
         assertTrue(exited)
         assertEquals(Status.IDLE, m.snapshot().status)
         assertEquals(0L, m.snapshot().remainingMs)
@@ -143,7 +235,7 @@ class SessionManagerTest {
         m.exitListener = { exited = true }
         m.configure(60_000L)
         m.onForegroundChanged("com.ss.android.ugc.aweme")
-        tick(60_000)
+        tick(70_000)                                     // 计时 60s + 警告期 10s
         assertTrue(exited)
         m.onForegroundChanged("com.ss.android.ugc.aweme")   // 立即重开
         assertEquals(Status.TIMING, m.snapshot().status)     // 无冷却，新会话满额度

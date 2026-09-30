@@ -240,6 +240,8 @@ fun MainScreen() {
                     "计时中 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒"
                 Status.PAUSED -> Color(0xFFFF9800) to
                     "已暂停 · 剩余 ${snap.remainingMs / 60_000} 分 ${snap.remainingMs % 60_000 / 1000} 秒（额度保留）"
+                Status.WARNING -> Color(0xFFF44336) to
+                    "额度已用完 · ${(snap.warningRemainingMs + 999) / 1000} 秒后返回桌面"
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
