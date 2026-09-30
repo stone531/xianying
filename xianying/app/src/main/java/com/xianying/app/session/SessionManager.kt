@@ -17,7 +17,11 @@ import com.xianying.app.model.TargetApp
  *  - 额度归零（必然发生在抖音前台期间）→ 触发 exitListener（执行返回桌面）→ 会话结束
  *  - 结束后无冷却：再进抖音按当前预设额度开新会话（产品红线：自主管控，不强制封锁）
  */
-class SessionManager(private val clock: Clock) {
+class SessionManager(
+    private val clock: Clock,
+    /** 目标判定函数，默认按 TargetApp 包名表；可注入替身包名用于模拟器测试。 */
+    private val isTargetPackage: (String?) -> Boolean = { TargetApp.fromPackage(it) != null },
+) {
 
     /** 每次状态/快照变化回调（含每秒 tick），供通知栏与主界面刷新。 */
     var listener: ((SessionSnapshot) -> Unit)? = null
@@ -45,7 +49,7 @@ class SessionManager(private val clock: Clock) {
 
     /** pkg = 当前前台包名；目标之外任意值（含 null）都算"离开目标"。 */
     fun onForegroundChanged(pkg: String?) {
-        val isTarget = TargetApp.fromPackage(pkg) != null
+        val isTarget = isTargetPackage(pkg)
         if (isTarget == inTarget) return                     // 幂等：状态没变就不动
         inTarget = isTarget
         when {
