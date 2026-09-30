@@ -5,15 +5,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.provider.Settings
 import com.xianying.app.control.ExitExecutor
 import com.xianying.app.runtime.Runtime
 import com.xianying.app.session.SessionSnapshot
@@ -56,17 +61,39 @@ class KeepAliveForegroundService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var vibrator: Vibrator? = null
+    private var pausedByScreenOff = false
+
+    /**
+     * 息屏/解锁感知（review P0-1）：抖音内按电源键后系统往往不发窗口事件（keyguard 是
+     * systemui 且已被过滤），会话会一路 TIMING 到额度耗尽——口袋里亮屏+震动+响铃。
+     * 息屏=脱离（暂停）；解锁=按息屏前在刷的 App 回放恢复（若解锁后实际在桌面，
+     * 随后的窗口事件会在 1 秒级内纠正为 PAUSED）。
+     */
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    val st = Runtime.sessionManager.snapshot().status
+                    if (st == Status.TIMING) {
+                        pausedByScreenOff = true
+                        Runtime.sessionManager.onForegroundChanged(null)
+                    }
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    if (pausedByScreenOff) {
+                        pausedByScreenOff = false
+                        Runtime.sessionManager.onForegroundChanged(Runtime.lastTargetPkg)
+                    }
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         running = true
         createChannels()
-        val noti = buildNotification("监控运行中")
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTI_ID, noti, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTI_ID, noti)
-        }
+        startForegroundWith(notiText = "监控运行中")
 
         // 状态机 → 常驻通知文案
         Runtime.sessionManager.listener = { snap ->
@@ -78,12 +105,19 @@ class KeepAliveForegroundService : Service() {
                 cancelWarningNotification()     // 警告结束（退出/会话终止）即撤掉警告通知，不能赖着不走
             }
         }
-        // 分级戒断 · 第一级：剩 1 分钟 → 顶部横幅预警（不遮挡、几秒自动消失）
-        Runtime.sessionManager.warnListener = { showPreWarning() }
+        // 分级戒断 · 第一级：剩 1 分钟 / 剩最后 1 条 → 顶部横幅预警（几秒自动消失）
+        Runtime.sessionManager.warnListener = {
+            val countMode = (Runtime.sessionManager.snapshot().config?.maxVideos ?: 0) > 0
+            showPreWarning(
+                if (countMode) "还剩最后 1 条" else "剩余不足 1 分钟，准备收尾吧"
+            )
+        }
         // 分级戒断 · 第二级：额度用完 → 全屏警告 + 震动 + 提示音（10 秒缓冲开始）
         Runtime.sessionManager.warningListener = { showWarningBlast() }
-        // 缓冲结束 → 返回桌面
-        Runtime.sessionManager.exitListener = { ExitExecutor.exitToHome() }
+        // 缓冲结束 → 返回桌面；失败（无障碍掉线）→ 修复提醒通知，不能静默失效
+        Runtime.sessionManager.exitListener = {
+            if (!ExitExecutor.exitToHome()) showRepairNotification()
+        }
 
         // 心跳：每秒滴答一次
         scope.launch {
@@ -91,6 +125,32 @@ class KeepAliveForegroundService : Service() {
                 Runtime.sessionManager.tick()
                 delay(1_000)
             }
+        }
+
+        // 息屏/解锁广播（protected system broadcast，注册无需导出标志也兼容 33+）
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenReceiver, filter)
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        startForegroundWith(notificationText(Runtime.sessionManager.snapshot()))
+        return START_STICKY                            // 进程被杀后系统尝试重启服务（review P2-1）
+    }
+
+    private fun startForegroundWith(notiText: String) {
+        val noti = buildNotification(notiText)
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTI_ID, noti, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTI_ID, noti)
         }
     }
 
@@ -108,10 +168,10 @@ class KeepAliveForegroundService : Service() {
     }
 
     /** 第一级预警：高优先级通知，顶部横幅数秒自动收起，不遮挡画面。 */
-    private fun showPreWarning() {
+    private fun showPreWarning(text: String) {
         val n = Notification.Builder(this, WARN_CHANNEL_ID)
             .setContentTitle("限映 · 额度即将用完")
-            .setContentText("剩余不足 1 分钟，准备收尾吧")
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setAutoCancel(true)
             .setTimeoutAfter(8_000)                 // 自动消失，符合"轻量提示"规格
@@ -119,8 +179,26 @@ class KeepAliveForegroundService : Service() {
         getSystemService(NotificationManager::class.java).notify(WARN_NOTI_ID, n)
     }
 
+    /** 返回桌面执行失败（无障碍服务掉线）时的修复提醒——fail-open 契约的"提醒修复"半句。 */
+    private fun showRepairNotification() {
+        val openA11y = PendingIntent.getActivity(
+            this, 1,
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = Notification.Builder(this, WARN_CHANNEL_ID)
+            .setContentTitle("限映 · 监控已失效")
+            .setContentText("额度已用完但未能返回桌面，请点此检查无障碍服务")
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentIntent(openA11y)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(WARN_NOTI_ID + 2, n)
+    }
+
     /** 第二级全屏警告：全屏 Intent 拉起警告页 + 震动 + 提示音（fail-open：页面被拦也不影响到点退出）。 */
     private fun showWarningBlast() {
+        getSystemService(NotificationManager::class.java).cancel(WARN_NOTI_ID)   // 预警横幅让位给全屏警告
         val n = buildWarningNotification(10_000L, withFullScreenIntent = true)
         getSystemService(NotificationManager::class.java).notify(WARN_NOTI_ID + 1, n)
 
@@ -179,11 +257,12 @@ class KeepAliveForegroundService : Service() {
         vibrator = null
     }
 
-    /** 提示音：闹钟流短促鸣响（无权限要求；失败静默放行）。 */
+    /** 提示音：闹钟流短促鸣响（无权限要求；失败静默放行；响完释放资源）。 */
     private fun playWarningTone() {
         try {
             val tone = ToneGenerator(AudioManager.STREAM_ALARM, 90)
             tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 1_500)
+            Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, 2_000)
         } catch (e: Exception) {
             android.util.Log.e("XianyingEye", "tone failed", e)
         }
@@ -219,6 +298,7 @@ class KeepAliveForegroundService : Service() {
         running = false
         stopWarningVibration()
         cancelWarningNotification()
+        try { unregisterReceiver(screenReceiver) } catch (_: Exception) { }
         scope.cancel()
         Runtime.sessionManager.listener = null
         Runtime.sessionManager.warnListener = null

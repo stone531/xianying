@@ -43,6 +43,7 @@ class MonitorAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         if (isOverlay(pkg)) return               // 非真前台的系统窗口，直接忽略
         log(pkg)
+        if (Runtime.isTarget(pkg)) Runtime.lastTargetPkg = pkg   // 记住息屏前在刷哪个 App
         android.util.Log.d("XianyingEye",
             "event pkg=$pkg isTarget=${Runtime.isTarget(pkg)} status=${Runtime.sessionManager.snapshot().status}")
         Runtime.sessionManager.onForegroundChanged(pkg)

@@ -2,8 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 悬浮窗（后续增强用）；VIBRATE = 分级戒断警告期震动；FULL_SCREEN_INTENT = 额度用完拉起全屏警告页 -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- VIBRATE = 分级戒断警告期震动；FULL_SCREEN_INTENT = 额度用完拉起全屏警告页。
+         （原声明的 SYSTEM_ALERT_WINDOW 未使用已删——悬浮窗属后续增强，届时再加，减少无谓的高危权限提示） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />

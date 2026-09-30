@@ -292,6 +292,22 @@ class SessionManagerTest {
         assertEquals(0, m.snapshot().watchedVideos)           // 条数清零重拿 2 条额度
     }
 
+    @Test fun countMode_preWarns_onLastRemainingVideo() {
+        // 规格：分级戒断"剩余 1 条"也要轻提示（review P1-2）
+        var warned = 0
+        val m = counter()
+        m.warnListener = { warned++ }
+        m.configure(0L, 3)                                    // 3 条额度
+        m.onForegroundChanged("com.ss.android.ugc.aweme")
+        tick(m, 6_000); swipe(m)                              // 第 1 条：不预警
+        assertEquals(0, warned)
+        tick(m, 6_000); swipe(m)                              // 第 2 条：已看 2/3，剩最后 1 条 → 预警
+        assertEquals(1, warned)
+        tick(m, 6_000); swipe(m)                              // 第 3 条：达标戒断
+        assertEquals(Status.WARNING, m.snapshot().status)
+        assertEquals(1, warned)                               // 预警不重复
+    }
+
     @Test fun countMode_swipeOutsideTarget_ignored() {
         val m = counter()
         m.configure(0L, 1)

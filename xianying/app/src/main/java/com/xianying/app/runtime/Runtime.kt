@@ -33,6 +33,9 @@ object Runtime {
         return t in enabledTargets
     }
 
+    /** 最近一次处于前台的目标包名（息屏前在刷哪个 App），解锁恢复时回放用。 */
+    @Volatile var lastTargetPkg: String? = null
+
     /**
      * 从本地设置恢复运行状态（幂等，可重复调用）。
      * 两个调用时机：① 主界面启动 ② 无障碍服务被系统重新绑定（进程被杀后自愈）。

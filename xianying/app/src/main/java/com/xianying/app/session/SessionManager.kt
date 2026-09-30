@@ -118,6 +118,11 @@ class SessionManager(
             enterWarning()
             return
         }
+        // 分级戒断第一级：条数只剩最后 1 条时轻提示（规格"剩余 1 条"，每会话一次）
+        if (maxVideos > 0 && !warningTriggered && watchedVideos >= maxVideos - 1) {
+            warningTriggered = true
+            warnListener?.invoke()
+        }
         emit()
     }
 
@@ -133,7 +138,7 @@ class SessionManager(
                 Status.TIMING -> {
                     // 时长模式最多用到归零；条数模式不限时长（remainingMs=0）则整段消耗
                     val step = if (quotaMs > 0) minOf(dt, remainingMs) else dt
-                    remainingMs -= step
+                    if (quotaMs > 0) remainingMs -= step      // 条数模式不动 remainingMs（保持 0，不为负）
                     videoAccumMs += step                      // 当前视频累计观看（切走/暂停即停）
                     dt -= step
                     if (quotaMs > 0 && remainingMs <= 0L) {   // 时长额度归零 → 分级戒断缓冲期

@@ -190,8 +190,12 @@ fun MainScreen() {
                         style = MaterialTheme.typography.titleLarge
                     )
                     Text(
-                        if (master) "已开启 · 进入目标 App 即开始计时"
-                        else "已关闭 · 开启前可修改目标与额度",
+                        when {
+                            master && Runtime.enabledTargets.isEmpty() ->
+                                "已开启 · 但未选择任何监控目标，监控不生效"
+                            master -> "已开启 · 进入目标 App 即开始计时"
+                            else -> "已关闭 · 开启前可修改目标与额度"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
